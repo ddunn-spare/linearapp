@@ -29,12 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. After approval, the action executes and the result (success or failure with explanation) appears inline in chat
   4. Action state is visible throughout its lifecycle (pending, executing, succeeded, failed) and persists across page refresh
   5. Double-clicking approve does not execute the action twice
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: SSE streaming refactor and approval state machine
-- [ ] 01-02: ApprovalManager service, tool registry extensions, and system prompt auto-generation
-- [ ] 01-03: Approval card UI, chat integration, and end-to-end approval flow
+- [ ] 01-01-PLAN.md -- Shared types, DB schema, action state machine, and SSE streaming refactor (Wave 1)
+- [ ] 01-02-PLAN.md -- Tool registry extensions, ApprovalManager service, action endpoints, and system prompt auto-generation (Wave 2)
+- [ ] 01-03-PLAN.md -- Approval card UI, ChatPage integration, and end-to-end approval flow (Wave 3)
 
 ### Phase 2: Linear & Internal Write Actions
 **Goal**: Agent can create, update, and manage Linear issues, projects, cycles, labels, and internal OKRs through the approval flow
@@ -90,7 +90,7 @@ Note: Phases 2 and 3 both depend on Phase 1 but not on each other. They are orde
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Approval Infrastructure & Flow | 0/3 | Not started | - |
+| 1. Approval Infrastructure & Flow | 0/3 | Planned | - |
 | 2. Linear & Internal Write Actions | 0/3 | Not started | - |
 | 3. GitHub Write Actions | 0/1 | Not started | - |
 | 4. Discovery & Rendering | 0/2 | Not started | - |
