@@ -4,7 +4,7 @@ import type { ChatService } from "../services/chatService";
 import type { ApprovalManager } from "../services/approvalManager";
 import type { StateDb } from "../db";
 
-export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatService: ChatService, _approvalManager?: ApprovalManager) {
+export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatService: ChatService, approvalManager: ApprovalManager) {
   // List conversations
   app.get("/api/chat/conversations", async () => {
     return { conversations: db.getConversations() };
@@ -24,7 +24,7 @@ export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatServic
     return { ok: true };
   });
 
-  // Send message — SSE streaming
+  // Send message -- SSE streaming
   app.post("/api/chat", async (request, reply) => {
     const schema = z.object({
       conversationId: z.string().min(1),
@@ -64,5 +64,51 @@ export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatServic
     const title = parsed.success ? parsed.data.title : "New conversation";
     const conversation = db.createConversation(crypto.randomUUID(), title);
     return { ok: true, conversation };
+  });
+
+  // ─── Action Approval Endpoints ───
+
+  // Approve and execute a proposed action
+  app.post("/api/chat/actions/:id/approve", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      await approvalManager.approve(id);
+      const executed = await approvalManager.execute(id);
+      return { ok: true, proposal: executed };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Approve failed";
+      return reply.status(400).send({ ok: false, error: msg });
+    }
+  });
+
+  // Decline a proposed action
+  app.post("/api/chat/actions/:id/decline", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const declined = await approvalManager.decline(id);
+      return { ok: true, proposal: declined };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Decline failed";
+      return reply.status(400).send({ ok: false, error: msg });
+    }
+  });
+
+  // Retry a failed action
+  app.post("/api/chat/actions/:id/retry", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const retried = await approvalManager.retry(id);
+      return { ok: true, proposal: retried };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Retry failed";
+      return reply.status(400).send({ ok: false, error: msg });
+    }
+  });
+
+  // Get all proposals for a conversation (for re-rendering on refresh, INFRA-04)
+  app.get("/api/chat/conversations/:id/proposals", async (request) => {
+    const { id } = request.params as { id: string };
+    const proposals = approvalManager.getProposalsByConversation(id);
+    return { proposals };
   });
 }
