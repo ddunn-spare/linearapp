@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 1 of 4 (Approval Infrastructure & Flow)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-12 -- Completed 01-01-PLAN.md
+Last activity: 2026-02-12 -- Completed 01-02-PLAN.md
 
-Progress: [#.........] 8%
+Progress: [##........] 17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
+- Total plans completed: 2
 - Average duration: 4min
-- Total execution time: 0.07 hours
+- Total execution time: 0.13 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-approval-infrastructure-flow | 1 | 4min | 4min |
+| 01-approval-infrastructure-flow | 2 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4min)
-- Trend: starting
+- Last 5 plans: 01-01 (4min), 01-02 (4min)
+- Trend: consistent
 
 *Updated after each plan completion*
 
@@ -47,6 +47,10 @@ Recent decisions affecting current work:
 - [01-01]: Idempotency key includes timestamp so same logical action can be re-proposed in different messages
 - [01-01]: markExecuting is idempotent (returns existing if already executing/succeeded) for double-click safety
 - [01-01]: Kept deprecated handleMessage() alongside new handleMessageStream() for backward compatibility
+- [01-02]: System prompt auto-generated from tool registry so write actions are always current (DISC-03)
+- [01-02]: Write tool interception feeds synthetic "proposed_for_approval" result to OpenAI for natural acknowledgment
+- [01-02]: Approve endpoint chains approve + execute atomically for single-click UX
+- [01-02]: Used setter injection for ApprovalManager on ChatService to avoid circular initialization
 
 ### Pending Todos
 
@@ -59,5 +63,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Completed 01-01-PLAN.md (approval infrastructure types, DB, state machine, SSE streaming)
+Stopped at: Completed 01-02-PLAN.md (tool registry, ApprovalManager, action endpoints, system prompt)
 Resume file: None
