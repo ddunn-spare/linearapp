@@ -98,44 +98,44 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | — | Pending |
-| INFRA-02 | — | Pending |
-| INFRA-03 | — | Pending |
-| INFRA-04 | — | Pending |
-| INFRA-05 | — | Pending |
-| APPR-01 | — | Pending |
-| APPR-02 | — | Pending |
-| APPR-03 | — | Pending |
-| APPR-04 | — | Pending |
-| APPR-05 | — | Pending |
-| APPR-06 | — | Pending |
-| APPR-07 | — | Pending |
-| LIN-01 | — | Pending |
-| LIN-02 | — | Pending |
-| LIN-03 | — | Pending |
-| LIN-04 | — | Pending |
-| LIN-05 | — | Pending |
-| LIN-06 | — | Pending |
-| LIN-07 | — | Pending |
-| LIN-08 | — | Pending |
-| GH-01 | — | Pending |
-| GH-02 | — | Pending |
-| GH-03 | — | Pending |
-| GH-04 | — | Pending |
-| INT-01 | — | Pending |
-| INT-02 | — | Pending |
-| DISC-01 | — | Pending |
-| DISC-02 | — | Pending |
-| DISC-03 | — | Pending |
-| REND-01 | — | Pending |
-| REND-02 | — | Pending |
-| REND-03 | — | Pending |
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
+| INFRA-04 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Pending |
+| APPR-01 | Phase 1 | Pending |
+| APPR-02 | Phase 1 | Pending |
+| APPR-03 | Phase 1 | Pending |
+| APPR-04 | Phase 1 | Pending |
+| APPR-05 | Phase 1 | Pending |
+| APPR-06 | Phase 1 | Pending |
+| APPR-07 | Phase 1 | Pending |
+| LIN-01 | Phase 2 | Pending |
+| LIN-02 | Phase 2 | Pending |
+| LIN-03 | Phase 2 | Pending |
+| LIN-04 | Phase 2 | Pending |
+| LIN-05 | Phase 2 | Pending |
+| LIN-06 | Phase 2 | Pending |
+| LIN-07 | Phase 2 | Pending |
+| LIN-08 | Phase 2 | Pending |
+| GH-01 | Phase 3 | Pending |
+| GH-02 | Phase 3 | Pending |
+| GH-03 | Phase 3 | Pending |
+| GH-04 | Phase 3 | Pending |
+| INT-01 | Phase 2 | Pending |
+| INT-02 | Phase 2 | Pending |
+| DISC-01 | Phase 4 | Pending |
+| DISC-02 | Phase 4 | Pending |
+| DISC-03 | Phase 1 | Pending |
+| REND-01 | Phase 4 | Pending |
+| REND-02 | Phase 4 | Pending |
+| REND-03 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 32 total
-- Mapped to phases: 0
-- Unmapped: 32 ⚠️
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after initial definition*
+*Last updated: 2026-02-12 after roadmap creation*
