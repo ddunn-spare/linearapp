@@ -2,9 +2,16 @@ import type OpenAI from "openai";
 import type { ChatMessage, ChatToolCall, ChatStreamEvent } from "@linearapp/shared";
 import type { StateDb } from "../db";
 import type { OpenAIClient } from "../adapters/openaiClient";
-import { getToolDefinitions, createToolHandlers, type ToolHandler } from "../tools/index";
+import type { ApprovalManager } from "./approvalManager";
+import { getToolDefinitions, createToolHandlers, isWriteTool, getWriteToolSummaries, type ToolHandler } from "../tools/index";
 
-const SYSTEM_PROMPT = `You are Team Hub AI, an intelligent assistant for the EAM engineering team. You help manage work using a "Shaped Kanban with OKR Guardrails" methodology.
+function buildSystemPrompt(): string {
+  const writeTools = getWriteToolSummaries();
+  const writeSection = writeTools.length > 0
+    ? `\n\nYou can also take actions on behalf of the user (these require user approval before execution):\n${writeTools.map(t => `- ${t.description}`).join("\n")}\n\nWhen you want to take an action, use the appropriate tool. The user will see a preview of what will change and can approve or decline. If they decline, acknowledge naturally and move on — do not ask follow-up questions about the declined action. If they approve, the action will execute and you'll see the result.`
+    : "";
+
+  return `You are Team Hub AI, an intelligent assistant for the EAM engineering team. You help manage work using a "Shaped Kanban with OKR Guardrails" methodology.
 
 Your capabilities:
 - Search and analyze issues from Linear
@@ -13,7 +20,7 @@ Your capabilities:
 - Evaluate OKR alignment for work items
 - Review GitHub PRs and review status
 - Calculate RICE scores for prioritization
-- Run ad-hoc queries against the team database
+- Run ad-hoc queries against the team database${writeSection}
 
 Key principles you follow:
 - Flow over utilization — minimize context switching
@@ -23,9 +30,11 @@ Key principles you follow:
 - Make work visible — surface blockers and risks proactively
 
 When answering questions, use your available tools to get real data. Don't guess — call the appropriate tool and base your answers on actual data.`;
+}
 
 export class ChatService {
   private toolHandlers: Record<string, ToolHandler>;
+  private approvalManager: ApprovalManager | null = null;
 
   constructor(
     private readonly db: StateDb,
@@ -33,6 +42,10 @@ export class ChatService {
     trackedLinearIds?: Set<string>,
   ) {
     this.toolHandlers = createToolHandlers(db, trackedLinearIds);
+  }
+
+  setApprovalManager(manager: ApprovalManager): void {
+    this.approvalManager = manager;
   }
 
   /**
@@ -63,7 +76,7 @@ export class ChatService {
     // Build message history
     const history = this.db.getMessages(conversationId);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt() },
       ...history.map(m => {
         if (m.role === "user") return { role: "user" as const, content: m.content };
         if (m.role === "assistant") return { role: "assistant" as const, content: m.content };
@@ -176,7 +189,7 @@ export class ChatService {
     // Build message history
     const history = this.db.getMessages(conversationId);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt() },
       ...history.map(m => {
         if (m.role === "user") return { role: "user" as const, content: m.content };
         if (m.role === "assistant") return { role: "assistant" as const, content: m.content };
@@ -187,6 +200,7 @@ export class ChatService {
     const tools = getToolDefinitions();
     const allToolCalls: ChatToolCall[] = [];
     let fullContent = "";
+    const pendingAssistantMsgId = crypto.randomUUID();
 
     // Function calling loop with streaming
     let iterations = 0;
@@ -263,6 +277,29 @@ export class ChatService {
         const toolName = tc.name;
         const toolArgs = tc.arguments;
 
+        // Intercept write tools: create proposal instead of executing
+        if (this.approvalManager && isWriteTool(toolName)) {
+          const parsedArgs = JSON.parse(toolArgs);
+          const proposal = this.approvalManager.createProposal({
+            conversationId,
+            messageId: pendingAssistantMsgId,
+            toolName,
+            toolArguments: parsedArgs,
+          });
+          yield { type: "action_proposed", proposal };
+
+          // Feed back a synthetic tool result telling OpenAI the action was proposed
+          const proposalResult = JSON.stringify({
+            status: "proposed_for_approval",
+            proposalId: proposal.id,
+            description: proposal.description,
+            message: "This action has been proposed to the user for approval. Wait for their decision before proceeding.",
+          });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: proposalResult });
+          allToolCalls.push({ id: tc.id, name: toolName, arguments: toolArgs, result: proposalResult });
+          continue; // Skip normal tool execution
+        }
+
         yield { type: "tool_call_start", toolCall: { id: tc.id, name: toolName } };
 
         let result: string;
@@ -294,9 +331,9 @@ export class ChatService {
       }
     }
 
-    // Save assistant message
+    // Save assistant message (use pre-generated ID so proposals reference the correct message)
     const assistantMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: pendingAssistantMsgId,
       conversationId,
       role: "assistant",
       content: fullContent,

@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ChatService } from "../services/chatService";
+import type { ApprovalManager } from "../services/approvalManager";
 import type { StateDb } from "../db";
 
-export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatService: ChatService) {
+export function registerChatRoutes(app: FastifyInstance, db: StateDb, chatService: ChatService, _approvalManager?: ApprovalManager) {
   // List conversations
   app.get("/api/chat/conversations", async () => {
     return { conversations: db.getConversations() };
