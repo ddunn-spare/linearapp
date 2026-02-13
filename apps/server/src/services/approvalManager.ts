@@ -75,7 +75,7 @@ export class ApprovalManager {
       const resultStr = await handler(proposal.toolArguments);
       const parsed = JSON.parse(resultStr);
 
-      if (parsed.error) {
+      if (parsed.error && !parsed.partialSuccess) {
         log.warn("Tool returned error", { proposalId, error: parsed.error });
         return this.stateMachine.markFailed(proposalId, String(parsed.error));
       }
@@ -83,6 +83,13 @@ export class ApprovalManager {
       // Build a summary string and extract URL if present
       const summary = this.buildResultSummary(proposal.toolName, parsed);
       const resultUrl = parsed.url || parsed.resultUrl || undefined;
+
+      // Partial success: the action ran but had mixed results. Mark as succeeded
+      // with a result string that clearly indicates partial success.
+      if (parsed.partialSuccess) {
+        log.info("Execution partially succeeded", { proposalId, summary });
+        return this.stateMachine.markSucceeded(proposalId, summary, resultUrl);
+      }
 
       log.info("Execution succeeded", { proposalId, summary });
       return this.stateMachine.markSucceeded(proposalId, summary, resultUrl);
@@ -197,6 +204,25 @@ export class ApprovalManager {
         if (action === "add_to_issue") return `Add label '${labelName}' to ${identifier || "unknown"}`;
         return `Remove label '${labelName}' from ${identifier || "unknown"}`;
       }
+      case "bulk_update_issues": {
+        const issueIds = Array.isArray(args.issueIds) ? args.issueIds : [];
+        const n = issueIds.length;
+        const updates = (args.updates || {}) as Record<string, unknown>;
+        const parts: string[] = [];
+        if (updates.priority !== undefined && updates.priority !== null) {
+          const labels = ["None", "Urgent", "High", "Medium", "Low"];
+          parts.push(`set priority to ${labels[Number(updates.priority)] || "None"}`);
+        }
+        if (updates.assigneeName) parts.push(`assign to ${String(updates.assigneeName)}`);
+        if (updates.status) parts.push(`set status to ${String(updates.status)}`);
+        if (updates.labelNames && Array.isArray(updates.labelNames) && updates.labelNames.length > 0) {
+          parts.push(`set labels`);
+        }
+        if (updates.projectName) parts.push(`set project to ${String(updates.projectName)}`);
+        const fieldSummary = parts.length > 0 ? parts.join(", ") : "update fields";
+        const largeBatch = n > 10 ? " (large batch)" : "";
+        return `Update ${n} issues: ${fieldSummary}${largeBatch}`;
+      }
       case "create_okr": {
         const objective = String(args.objective || "Untitled");
         const quarter = String(args.quarter || "");
@@ -263,6 +289,15 @@ export class ApprovalManager {
         if (parsed.labelId) return `Created label: ${labelName}`;
         const identifier = parsed.issueIdentifier || "unknown";
         return `Label '${labelName}' updated on ${identifier}`;
+      }
+      case "bulk_update_issues": {
+        if (parsed.partialSuccess) {
+          return `Updated ${parsed.updatedCount}/${parsed.totalCount} issues (${parsed.failedCount} failed)`;
+        }
+        if (parsed.success === false) {
+          return `All updates failed`;
+        }
+        return `Updated ${parsed.updatedCount || 0} issues successfully`;
       }
       case "create_okr":
         return `Created OKR: ${parsed.objective || "unknown"}`;

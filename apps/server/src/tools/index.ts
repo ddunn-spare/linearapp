@@ -136,6 +136,35 @@ const toolMetadata = new Map<string, ToolMetadata>([
       return fields;
     },
   }],
+  ["bulk_update_issues", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Update multiple Linear issues at once",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      const issueIds = Array.isArray(args.issueIds) ? args.issueIds.map(String) : [];
+      fields.push({ field: "Issues", newValue: `${issueIds.slice(0, 5).join(", ")}${issueIds.length > 5 ? ` (+${issueIds.length - 5} more)` : ""} (${issueIds.length} issues)` });
+
+      const updates = (args.updates || {}) as Record<string, unknown>;
+      if (updates.priority !== undefined && updates.priority !== null) {
+        const labels = ["None", "Urgent", "High", "Medium", "Low"];
+        fields.push({ field: "Set Priority", newValue: labels[Number(updates.priority)] || "None" });
+      }
+      if (updates.assigneeName) fields.push({ field: "Set Assignee", newValue: String(updates.assigneeName) });
+      if (updates.status) fields.push({ field: "Set Status", newValue: String(updates.status) });
+      if (updates.labelNames && Array.isArray(updates.labelNames) && updates.labelNames.length > 0) {
+        fields.push({ field: "Set Labels", newValue: (updates.labelNames as string[]).join(", ") });
+      }
+      if (updates.projectName) fields.push({ field: "Set Project", newValue: String(updates.projectName) });
+
+      if (issueIds.length > 10) {
+        fields.push({ field: "Warning", newValue: `Bulk operation affects ${issueIds.length} issues. Please review carefully.` });
+      }
+
+      return fields;
+    },
+  }],
   ["create_okr", {
     requiresApproval: true,
     category: "action",
@@ -551,6 +580,39 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
             color: { type: ["string", "null"], description: "Hex color for new label (e.g. #FF0000)" },
           },
           required: ["action", "labelName", "issueId", "color"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "bulk_update_issues",
+        description: "Update multiple Linear issues at once with the same changes (priority, assignee, status, labels, project)",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            issueIds: {
+              type: "array",
+              items: { type: "string" },
+              description: "Issue IDs or identifiers (e.g. [\"ENG-123\", \"ENG-456\"])",
+            },
+            updates: {
+              type: "object",
+              description: "Fields to update on all issues",
+              properties: {
+                priority: { type: ["number", "null"], description: "New priority (0=none, 1=urgent, 2=high, 3=medium, 4=low)", enum: [0, 1, 2, 3, 4, null] },
+                assigneeName: { type: ["string", "null"], description: "New assignee name" },
+                status: { type: ["string", "null"], description: "New status name" },
+                labelNames: { type: ["array", "null"], items: { type: "string" }, description: "New label names" },
+                projectName: { type: ["string", "null"], description: "New project name" },
+              },
+              required: ["priority", "assigneeName", "status", "labelNames", "projectName"],
+              additionalProperties: false,
+            },
+          },
+          required: ["issueIds", "updates"],
           additionalProperties: false,
         },
       },
@@ -1225,6 +1287,103 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
       const newLabelIds = currentLabelIds.filter(id => id !== targetLabelId);
       const result = await linear.updateIssue(issueId, { labelIds: newLabelIds });
       return JSON.stringify({ success: result.success, labelName, issueIdentifier: rawIssueId });
+    },
+
+    bulk_update_issues: async (args) => {
+      const issueIds = Array.isArray(args.issueIds) ? args.issueIds.map(String) : [];
+      if (issueIds.length === 0) {
+        return JSON.stringify({ error: "At least one issue ID is required" });
+      }
+
+      if (issueIds.length > 10) {
+        // Soft cap: log warning but proceed
+        console.warn(`[bulk_update_issues] Large batch: ${issueIds.length} issues`);
+      }
+
+      const updates = (args.updates || {}) as Record<string, unknown>;
+
+      // Resolve shared values once
+      let assigneeId: string | undefined;
+      if (updates.assigneeName) {
+        assigneeId = resolveMemberByName(String(updates.assigneeName));
+      }
+
+      let stateId: string | undefined;
+      if (updates.status) {
+        stateId = await resolveStatusByName(String(updates.status));
+      }
+
+      let labelIds: string[] | undefined;
+      if (updates.labelNames && Array.isArray(updates.labelNames) && updates.labelNames.length > 0) {
+        const resolved = await linear.listLabelsByName((updates.labelNames as string[]).map(String));
+        labelIds = resolved.map(l => l.id);
+      }
+
+      let projectId: string | undefined;
+      if (updates.projectName) {
+        projectId = await resolveProjectByName(String(updates.projectName));
+      }
+
+      const results: Array<{ issueId: string; identifier: string; success: boolean; url?: string }> = [];
+      const failures: Array<{ issueId: string; identifier: string; error: string }> = [];
+
+      for (const rawId of issueIds) {
+        const resolvedId = resolveIssueId(rawId);
+        const input: Record<string, unknown> = {};
+
+        if (updates.priority !== undefined && updates.priority !== null) input.priority = Number(updates.priority);
+        if (assigneeId) input.assigneeId = assigneeId;
+        if (stateId) input.stateId = stateId;
+        if (labelIds) input.labelIds = labelIds;
+        if (projectId) input.projectId = projectId;
+
+        try {
+          const result = await linear.updateIssue(resolvedId, input);
+          results.push({
+            issueId: result.issue?.id || resolvedId,
+            identifier: result.issue?.identifier || rawId,
+            success: result.success,
+            url: result.issue?.url,
+          });
+        } catch (error) {
+          failures.push({
+            issueId: resolvedId,
+            identifier: rawId,
+            error: error instanceof Error ? error.message : "Update failed",
+          });
+        }
+      }
+
+      const totalCount = issueIds.length;
+      const successCount = results.length;
+      const failedCount = failures.length;
+
+      if (failedCount === 0) {
+        return JSON.stringify({
+          success: true,
+          updatedCount: successCount,
+          results,
+        });
+      }
+
+      if (successCount === 0) {
+        return JSON.stringify({
+          success: false,
+          error: "All updates failed",
+          failedCount,
+          failures,
+        });
+      }
+
+      // Partial success
+      return JSON.stringify({
+        partialSuccess: true,
+        updatedCount: successCount,
+        failedCount,
+        totalCount,
+        results,
+        failures,
+      });
     },
 
     create_okr: async (args) => {
