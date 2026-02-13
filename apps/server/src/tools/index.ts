@@ -410,7 +410,7 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
       type: "function",
       function: {
         name: "find_similar_issues",
-        description: "Find issues similar to a given query or issue",
+        description: "Find issues semantically similar to a query using vector embeddings (falls back to text search if embeddings unavailable)",
         strict: true,
         parameters: {
           type: "object",
@@ -854,7 +854,7 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
   ];
 }
 
-export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>): Record<string, ToolHandler> {
+export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>, embeddingService?: { findSimilar(query: string, limit?: number): Promise<Array<{ issueId: string; identifier: string; title: string; similarity: number; assigneeName?: string; status?: string }>> }): Record<string, ToolHandler> {
   // Set up dynamic previews that need db access
   const deleteOkrMeta = toolMetadata.get("delete_okr");
   if (deleteOkrMeta) {
@@ -1022,10 +1022,17 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
     get_cycle_stats: async (args) => {
       const cycleId = args.cycleId ? String(args.cycleId) : null;
       const cycle = cycleId ? db.getCycleById(cycleId) : db.getActiveCycle();
-      if (!cycle) return JSON.stringify({ error: cycleId ? "Cycle not found" : "No active cycle" });
+      if (!cycle) return JSON.stringify({ error: cycleId ? "Cycle not found" : "No active cycle found — cycles may not be synced or the team may be between cycles" });
       const issues = db.getIssuesByCycle(cycle.id);
       const completed = issues.filter(i => i.snapshot.boardColumn === "done").length;
       const inProgress = issues.filter(i => i.snapshot.boardColumn === "in_progress" || i.snapshot.boardColumn === "in_review").length;
+
+      const now = new Date();
+      const start = new Date(cycle.startsAt);
+      const end = new Date(cycle.endsAt);
+      const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysRemaining = Math.max(0, totalDays - elapsedDays);
 
       // Per-member breakdown
       const memberMap = new Map<string, { name: string; assigned: number; completed: number; inProgress: number; todo: number }>();
@@ -1045,6 +1052,7 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
       return JSON.stringify({
         id: cycle.id,
         name: cycle.name,
+        number: cycle.number,
         progress: Math.round(cycle.progress * 100),
         totalIssues: issues.length,
         completed,
@@ -1052,6 +1060,12 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
         remaining: issues.length - completed,
         startsAt: cycle.startsAt,
         endsAt: cycle.endsAt,
+        totalDays,
+        elapsedDays,
+        daysRemaining,
+        isActive: cycle.isActive,
+        completedScopeCount: cycle.completedScopeCount,
+        totalScopeCount: cycle.totalScopeCount,
         memberBreakdown: Array.from(memberMap.entries()).map(([memberId, stats]) => ({
           memberId, ...stats,
         })),
@@ -1060,17 +1074,27 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
 
     list_cycles: async () => {
       const cycles = db.getAllCycles();
-      return JSON.stringify(cycles.map(c => ({
-        id: c.id,
-        name: c.name,
-        number: c.number,
-        startsAt: c.startsAt,
-        endsAt: c.endsAt,
-        progress: Math.round(c.progress * 100),
-        completedScopeCount: c.completedScopeCount,
-        totalScopeCount: c.totalScopeCount,
-        isActive: c.isActive,
-      })));
+      const now = new Date();
+      return JSON.stringify(cycles.map(c => {
+        const start = new Date(c.startsAt);
+        const end = new Date(c.endsAt);
+        const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const daysRemaining = Math.max(0, totalDays - elapsedDays);
+        return {
+          id: c.id,
+          name: c.name,
+          number: c.number,
+          startsAt: c.startsAt,
+          endsAt: c.endsAt,
+          progress: Math.round(c.progress * 100),
+          completedScopeCount: c.completedScopeCount,
+          totalScopeCount: c.totalScopeCount,
+          isActive: c.isActive,
+          totalDays,
+          daysRemaining,
+        };
+      }));
     },
 
     get_clients: async (args) => {
@@ -1184,12 +1208,32 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
 
     find_similar_issues: async (args) => {
       const query = String(args.query || "");
+
+      // Try vector similarity search first
+      if (embeddingService) {
+        try {
+          const vectorResults = await embeddingService.findSimilar(query, 5);
+          if (vectorResults.length > 0) {
+            return JSON.stringify(vectorResults.map(r => ({
+              identifier: r.identifier,
+              title: r.title,
+              status: r.status,
+              assigneeName: r.assigneeName,
+              similarity: r.similarity,
+              searchMethod: "vector",
+            })));
+          }
+        } catch { /* fall through to text search */ }
+      }
+
+      // Fallback to text search
       const results = db.searchIssues(query, 5);
       return JSON.stringify(results.map(i => ({
         identifier: i.snapshot.identifier,
         title: i.snapshot.title,
         status: i.snapshot.status,
         assigneeName: i.snapshot.assigneeName,
+        searchMethod: "text",
       })));
     },
 

@@ -19,6 +19,7 @@ export class LinearSyncService {
     await this.syncCycles();
     await this.syncCustomers();
     await this.syncProjects();
+    await this.syncInitiativesAsOkrs();
   }
 
   async syncMembers(): Promise<void> {
@@ -87,20 +88,40 @@ export class LinearSyncService {
   async syncCycles(): Promise<void> {
     if (!this.linear.hasKey) return;
     const rawCycles = await this.linear.listCycles(this.cfg.linearTeamKey);
+    if (rawCycles.length === 0) {
+      log.warn("No cycles returned from Linear — check team key or workspace configuration");
+      return;
+    }
     const now = new Date();
-    const cycles: Cycle[] = rawCycles.map(c => ({
-      id: c.id,
-      name: c.name,
-      number: c.number,
-      startsAt: c.startsAt,
-      endsAt: c.endsAt,
-      completedScopeCount: c.completedScopeCount,
-      totalScopeCount: c.scopeCount,
-      progress: c.progress,
-      isActive: new Date(c.startsAt) <= now && now <= new Date(c.endsAt),
-    }));
+    const cycles: Cycle[] = rawCycles.map(c => {
+      const startsAt = new Date(c.startsAt);
+      const endsAt = new Date(c.endsAt);
+      // Use end-of-day for endsAt so the cycle stays active on its last day
+      endsAt.setHours(23, 59, 59, 999);
+      return {
+        id: c.id,
+        name: c.name,
+        number: c.number,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        completedScopeCount: c.completedScopeCount,
+        totalScopeCount: c.scopeCount,
+        progress: c.progress,
+        isActive: startsAt <= now && now <= endsAt,
+      };
+    });
+    const activeCycle = cycles.find(c => c.isActive);
+    if (!activeCycle) {
+      log.warn("No active cycle found — closest upcoming or most recent may be between cycles", {
+        total: cycles.length,
+        mostRecent: cycles[0]?.name,
+        mostRecentEnd: cycles[0]?.endsAt,
+      });
+    } else {
+      log.info("Active cycle identified", { name: activeCycle.name, number: activeCycle.number, progress: activeCycle.progress });
+    }
     this.db.upsertCycles(cycles);
-    log.info("Synced cycles", { count: cycles.length });
+    log.info("Synced cycles", { count: cycles.length, active: activeCycle?.name ?? "none" });
   }
 
   /**
@@ -168,4 +189,98 @@ export class LinearSyncService {
       log.warn("Project sync failed", { error: e instanceof Error ? e.message : "unknown" });
     }
   }
+
+  /**
+   * Sync Linear initiatives as OKRs.
+   * - Initiative → OKR objective
+   * - Linked projects (filtered to EAM team) → key results
+   * - Project progress → KR progress
+   */
+  async syncInitiativesAsOkrs(): Promise<void> {
+    if (!this.linear.hasKey) return;
+    try {
+      const initiatives = await this.linear.listInitiatives();
+      if (initiatives.length === 0) {
+        log.debug("No initiatives found in Linear");
+        return;
+      }
+
+      const teamKey = this.cfg.linearTeamKey;
+      const now = new Date().toISOString();
+      let synced = 0;
+
+      for (const initiative of initiatives) {
+        // Filter projects to only those that include the EAM team
+        const eamProjects = initiative.projects.filter(p =>
+          p.teamKeys.includes(teamKey)
+        );
+
+        // Skip initiatives with no EAM-related projects
+        if (eamProjects.length === 0) continue;
+
+        // Map initiative → OKR
+        const okrId = `initiative-${initiative.id}`;
+
+        // Map linked projects → key results
+        const keyResults = eamProjects.map((p, i) => {
+          const totalIssues = p.issueCount || 1;
+          const completedIssues = p.completedIssueCount || 0;
+          const progress = totalIssues > 0 ? (completedIssues / totalIssues) * 100 : 0;
+          return {
+            id: `${okrId}-kr-${i}`,
+            okrId,
+            description: p.name,
+            targetValue: totalIssues,
+            currentValue: completedIssues,
+            unit: "issues",
+            progress,
+          };
+        });
+
+        const avgProgress = keyResults.length > 0
+          ? keyResults.reduce((s, k) => s + k.progress, 0) / keyResults.length
+          : 0;
+
+        // Determine quarter from targetDate or current quarter
+        const quarter = initiative.targetDate
+          ? deriveQuarter(initiative.targetDate)
+          : deriveQuarter(now);
+
+        const totalIssueCount = eamProjects.reduce((s, p) => s + p.issueCount, 0);
+
+        this.db.upsertOkr({
+          okrId,
+          quarter,
+          owner: initiative.ownerName || "Unassigned",
+          status: mapInitiativeStatus(initiative.status),
+          objective: initiative.name,
+          keyResults,
+          progress: avgProgress,
+          issueCount: totalIssueCount,
+          createdAt: initiative.createdAt,
+          updatedAt: now,
+        });
+        synced++;
+      }
+
+      log.info("Synced initiatives as OKRs", { total: initiatives.length, synced, teamKey });
+    } catch (e) {
+      log.warn("Initiative sync failed", { error: e instanceof Error ? e.message : "unknown" });
+    }
+  }
+}
+
+function deriveQuarter(dateStr: string): string {
+  const date = new Date(dateStr);
+  const month = date.getMonth();
+  const quarter = Math.floor(month / 3) + 1;
+  return `Q${quarter} ${date.getFullYear()}`;
+}
+
+function mapInitiativeStatus(status: string): string {
+  const lower = status.toLowerCase();
+  if (lower === "completed" || lower === "done") return "completed";
+  if (lower === "canceled" || lower === "cancelled") return "canceled";
+  if (lower === "paused" || lower === "on hold") return "on-hold";
+  return "active";
 }
