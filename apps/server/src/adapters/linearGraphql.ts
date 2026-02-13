@@ -427,6 +427,54 @@ export class LinearGraphqlClient {
   }
 }
 
+  // ─── Initiative Queries ───
+
+  async listInitiatives(): Promise<LinearInitiative[]> {
+    try {
+      const data = await this.query<{
+        initiatives: { nodes: Array<{
+          id: string; name: string; description?: string;
+          status: string; sortOrder: number;
+          targetDate?: string; createdAt: string; updatedAt: string;
+          owner?: { id: string; name: string };
+          projects: { nodes: Array<{
+            id: string; name: string; description?: string; state: string;
+            progress: number; startDate?: string; targetDate?: string; url: string;
+            issues: { nodes: Array<{ id: string; completedAt?: string }> };
+            teams: { nodes: Array<{ key: string }> };
+          }> };
+        }> };
+      }>(`query{initiatives(first:50){nodes{id name description status sortOrder targetDate createdAt updatedAt owner{id name}projects{nodes{id name description state progress startDate targetDate url issues{nodes{id completedAt}}teams{nodes{key}}}}}}}`, {});
+      return data.initiatives.nodes.map(i => ({
+        id: i.id,
+        name: i.name,
+        description: i.description,
+        status: i.status,
+        sortOrder: i.sortOrder,
+        targetDate: i.targetDate,
+        ownerName: i.owner?.name,
+        createdAt: i.createdAt,
+        updatedAt: i.updatedAt,
+        projects: i.projects?.nodes?.map(p => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          state: p.state,
+          progress: p.progress,
+          startDate: p.startDate,
+          targetDate: p.targetDate,
+          url: p.url,
+          issueCount: p.issues?.nodes?.length || 0,
+          completedIssueCount: p.issues?.nodes?.filter(iss => iss.completedAt)?.length || 0,
+          teamKeys: p.teams?.nodes?.map(t => t.key) || [],
+        })) || [],
+      }));
+    } catch {
+      return []; // Initiatives may not be available
+    }
+  }
+}
+
 // ─── Additional Types ───
 
 export type LinearCustomer = {
@@ -440,4 +488,18 @@ export type LinearProject = {
   id: string; name: string; description?: string; state: string;
   progress: number; startDate?: string; targetDate?: string; url: string;
   issueCount: number; completedIssueCount: number; memberIds: string[];
+};
+
+export type LinearInitiativeProject = {
+  id: string; name: string; description?: string; state: string;
+  progress: number; startDate?: string; targetDate?: string; url: string;
+  issueCount: number; completedIssueCount: number; teamKeys: string[];
+};
+
+export type LinearInitiative = {
+  id: string; name: string; description?: string;
+  status: string; sortOrder: number;
+  targetDate?: string; ownerName?: string;
+  createdAt: string; updatedAt: string;
+  projects: LinearInitiativeProject[];
 };
