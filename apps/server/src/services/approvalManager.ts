@@ -258,6 +258,14 @@ export class ApprovalManager {
         if (action === "unlink") return `Unlink ${identifier} from key result`;
         return `Link ${identifier} to key result`;
       }
+      case "update_client_weight": {
+        const clientId = String(args.clientId || "unknown");
+        const parts: string[] = [];
+        if (args.weight !== undefined && args.weight !== null) parts.push(`weight=${args.weight}`);
+        if (args.notes !== undefined && args.notes !== null) parts.push("notes");
+        if (args.contractValue !== undefined && args.contractValue !== null) parts.push(`contract=$${args.contractValue}`);
+        return `Update client ${clientId}: ${parts.join(", ") || "no changes"}`;
+      }
       default:
         return `Execute ${toolName}`;
     }
@@ -315,6 +323,8 @@ export class ApprovalManager {
         if (action === "unlink") return `Issue ${identifier} unlinked from key result`;
         return `Issue ${identifier} linked to key result`;
       }
+      case "update_client_weight":
+        return `Updated client: ${parsed.name || "unknown"}`;
       default:
         return parsed.success ? "Action completed successfully" : JSON.stringify(parsed).slice(0, 200);
     }

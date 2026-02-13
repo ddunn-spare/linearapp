@@ -74,7 +74,7 @@ export class LinearGraphqlClient {
           id: string; name?: string; number: number; startsAt: string; endsAt: string;
           completedScopeCount: number; scopeCount: number; progress: number;
         }> } }> };
-      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:10){nodes{id number startsAt endsAt completedScopeCount scopeCount progress}}}}}`, { teamKey });
+      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:createdAt){nodes{id name number startsAt endsAt completedScopeCount scopeCount progress}}}}}`, { teamKey });
       return unwrapConnection(data.teams.nodes[0]?.cycles).map(c => ({ ...c, name: c.name || `Cycle ${c.number}` }));
     } catch {
       return []; // Cycles are optional — don't fail sync
@@ -99,7 +99,7 @@ export class LinearGraphqlClient {
 
     while (hasNextPage && results.length < limit) {
       const pageSize = Math.min(100, limit - results.length);
-      const resp: { issues: { nodes: IssueNode[]; pageInfo: { hasNextPage: boolean; endCursor?: string } } } = await this.query(`query($teamKey:String!,$first:Int!,$after:String){issues(first:$first,after:$after,orderBy:updatedAt,filter:{team:{key:{eq:$teamKey}}}){nodes{id identifier title description url createdAt updatedAt completedAt estimate priority state{id name type}assignee{id name}labels{nodes{name}}project{id name}team{id key}}pageInfo{hasNextPage endCursor}}}`,
+      const resp: { issues: { nodes: IssueNode[]; pageInfo: { hasNextPage: boolean; endCursor?: string } } } = await this.query(`query($teamKey:String!,$first:Int!,$after:String){issues(first:$first,after:$after,orderBy:updatedAt,filter:{team:{key:{eq:$teamKey}}}){nodes{id identifier title description url createdAt updatedAt completedAt estimate priority state{id name type}assignee{id name}labels{nodes{name}}project{id name}cycle{id name}team{id key}}pageInfo{hasNextPage endCursor}}}`,
         { teamKey, first: pageSize, after: cursor });
 
       results.push(...resp.issues.nodes);
@@ -365,4 +365,79 @@ export class LinearGraphqlClient {
     );
     return data.issue?.labels?.nodes || [];
   }
+
+  // ─── Customer Queries ───
+
+  async listCustomers(): Promise<LinearCustomer[]> {
+    try {
+      const data = await this.query<{
+        customers: { nodes: Array<{
+          id: string; name: string; domains: string[];
+          tier?: { id: string; name: string };
+          status?: { id: string; name: string };
+          revenue?: number; size?: number; logoUrl?: string;
+          owner?: { id: string; name: string };
+          createdAt: string; updatedAt: string;
+        }> };
+      }>(`query{customers(first:100){nodes{id name domains tier{id name}status{id name}revenue size logoUrl owner{id name}createdAt updatedAt}}}`, {});
+      return data.customers.nodes.map(c => ({
+        id: c.id,
+        name: c.name,
+        domains: c.domains || [],
+        tierId: c.tier?.id,
+        tierName: c.tier?.name,
+        statusId: c.status?.id,
+        statusName: c.status?.name,
+        revenue: c.revenue,
+        size: c.size,
+        logoUrl: c.logoUrl,
+        ownerName: c.owner?.name,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
+    } catch {
+      return []; // Customers feature may not be enabled
+    }
+  }
+
+  // ─── Detailed Project Queries ───
+
+  async listProjectsDetailed(teamKey: string): Promise<LinearProject[]> {
+    const data = await this.query<{
+      teams: { nodes: Array<{ projects: { nodes: Array<{
+        id: string; name: string; description?: string; state: string;
+        progress: number; startDate?: string; targetDate?: string; url: string;
+        issues: { nodes: Array<{ id: string; completedAt?: string }> };
+        members: { nodes: Array<{ id: string }> };
+      }> } }> };
+    }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{projects{nodes{id name description state progress startDate targetDate url issues{nodes{id completedAt}}members{nodes{id}}}}}}}`, { teamKey });
+    return unwrapConnection(data.teams.nodes[0]?.projects).map(p => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      state: p.state,
+      progress: p.progress,
+      startDate: p.startDate,
+      targetDate: p.targetDate,
+      url: p.url,
+      issueCount: p.issues?.nodes?.length || 0,
+      completedIssueCount: p.issues?.nodes?.filter(i => i.completedAt)?.length || 0,
+      memberIds: p.members?.nodes?.map(m => m.id) || [],
+    }));
+  }
 }
+
+// ─── Additional Types ───
+
+export type LinearCustomer = {
+  id: string; name: string; domains: string[];
+  tierId?: string; tierName?: string; statusId?: string; statusName?: string;
+  revenue?: number; size?: number; logoUrl?: string; ownerName?: string;
+  createdAt: string; updatedAt: string;
+};
+
+export type LinearProject = {
+  id: string; name: string; description?: string; state: string;
+  progress: number; startDate?: string; targetDate?: string; url: string;
+  issueCount: number; completedIssueCount: number; memberIds: string[];
+};

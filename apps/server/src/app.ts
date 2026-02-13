@@ -27,6 +27,8 @@ import { registerGithubRoutes } from "./routes/github";
 import { registerChatRoutes } from "./routes/chat";
 import { registerOverviewRoutes } from "./routes/overview";
 import { registerSkillRoutes } from "./routes/skills";
+import { registerClientRoutes } from "./routes/clients";
+import { registerProjectRoutes } from "./routes/projects";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -98,6 +100,8 @@ export const createApp = async (cfg: AppConfig) => {
   registerChatRoutes(app, db, chatService, approvalManager);
   registerOverviewRoutes(app, db, openai, trackedLinearIds);
   registerSkillRoutes(app, skillService);
+  registerClientRoutes(app, db);
+  registerProjectRoutes(app, db);
 
   // Seed built-in skills (only inserts if skill with that name doesn't already exist)
   {

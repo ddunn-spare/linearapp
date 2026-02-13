@@ -197,6 +197,43 @@ CREATE TABLE IF NOT EXISTS skills (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  linear_customer_id TEXT UNIQUE,
+  name TEXT NOT NULL,
+  tier TEXT,
+  tier_id TEXT,
+  status TEXT,
+  contract_value REAL,
+  revenue REAL,
+  domains_json TEXT NOT NULL DEFAULT '[]',
+  weight REAL NOT NULL DEFAULT 1.0,
+  notes TEXT,
+  logo_url TEXT,
+  owner_name TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  synced_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  state TEXT NOT NULL DEFAULT 'planned',
+  progress REAL NOT NULL DEFAULT 0,
+  start_date TEXT,
+  target_date TEXT,
+  url TEXT,
+  issue_count INTEGER NOT NULL DEFAULT 0,
+  completed_issue_count INTEGER NOT NULL DEFAULT 0,
+  member_ids_json TEXT NOT NULL DEFAULT '[]',
+  synced_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const defaultWipLimits: WipLimit[] = [
@@ -547,35 +584,27 @@ export class StateDb {
     tx(cycles);
   }
 
-  getActiveCycle(): Cycle | undefined {
-    const r = this.db.prepare(`SELECT * FROM cycles WHERE is_active = 1 LIMIT 1`).get() as any;
-    if (!r) return undefined;
+  private toCycle(r: any): Cycle {
     return {
       id: r.id, name: r.name, number: r.number, startsAt: r.starts_at,
       endsAt: r.ends_at, completedScopeCount: r.completed_scope_count,
       totalScopeCount: r.total_scope_count, progress: r.progress,
       isActive: Boolean(r.is_active),
     };
+  }
+
+  getActiveCycle(): Cycle | undefined {
+    const r = this.db.prepare(`SELECT * FROM cycles WHERE is_active = 1 LIMIT 1`).get() as any;
+    return r ? this.toCycle(r) : undefined;
   }
 
   getCycleById(id: string): Cycle | undefined {
     const r = this.db.prepare(`SELECT * FROM cycles WHERE id = ?`).get(id) as any;
-    if (!r) return undefined;
-    return {
-      id: r.id, name: r.name, number: r.number, startsAt: r.starts_at,
-      endsAt: r.ends_at, completedScopeCount: r.completed_scope_count,
-      totalScopeCount: r.total_scope_count, progress: r.progress,
-      isActive: Boolean(r.is_active),
-    };
+    return r ? this.toCycle(r) : undefined;
   }
 
   getAllCycles(): Cycle[] {
-    return (this.db.prepare(`SELECT * FROM cycles ORDER BY number DESC`).all() as any[]).map(r => ({
-      id: r.id, name: r.name, number: r.number, startsAt: r.starts_at,
-      endsAt: r.ends_at, completedScopeCount: r.completed_scope_count,
-      totalScopeCount: r.total_scope_count, progress: r.progress,
-      isActive: Boolean(r.is_active),
-    }));
+    return (this.db.prepare(`SELECT * FROM cycles ORDER BY number DESC`).all() as any[]).map(r => this.toCycle(r));
   }
 
   // ─── OKRs ───
@@ -968,4 +997,188 @@ export class StateDb {
     for (const r of rows) result[r.board_column] = r.cnt;
     return result as Record<BoardColumnId, number>;
   }
+
+  // ─── Clients ───
+
+  upsertClient(client: {
+    linearCustomerId: string;
+    name: string;
+    tier?: string;
+    tierId?: string;
+    status?: string;
+    revenue?: number;
+    domainsJson: string;
+    logoUrl?: string;
+    ownerName?: string;
+    isActive: boolean;
+    syncedAt: string;
+  }): void {
+    this.db.prepare(`
+      INSERT INTO clients (linear_customer_id, name, tier, tier_id, status, revenue, domains_json, logo_url, owner_name, is_active, synced_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(linear_customer_id) DO UPDATE SET
+        name=excluded.name, tier=excluded.tier, tier_id=excluded.tier_id,
+        status=excluded.status, revenue=excluded.revenue,
+        domains_json=excluded.domains_json, logo_url=excluded.logo_url,
+        owner_name=excluded.owner_name, is_active=excluded.is_active,
+        synced_at=excluded.synced_at, updated_at=datetime('now')
+    `).run(
+      client.linearCustomerId, client.name, client.tier ?? null, client.tierId ?? null,
+      client.status ?? null, client.revenue ?? null, client.domainsJson,
+      client.logoUrl ?? null, client.ownerName ?? null, client.isActive ? 1 : 0,
+      client.syncedAt,
+    );
+  }
+
+  getClients(filters?: { tier?: string; isActive?: boolean }): ClientRow[] {
+    let sql = `SELECT * FROM clients WHERE 1=1`;
+    const params: any[] = [];
+    if (filters?.tier) { sql += ` AND tier = ?`; params.push(filters.tier); }
+    if (filters?.isActive !== undefined) { sql += ` AND is_active = ?`; params.push(filters.isActive ? 1 : 0); }
+    sql += ` ORDER BY weight DESC, name ASC`;
+    return (this.db.prepare(sql).all(...params) as any[]).map(r => this.toClientRow(r));
+  }
+
+  getClientById(id: number): ClientRow | undefined {
+    const r = this.db.prepare(`SELECT * FROM clients WHERE id = ?`).get(id) as any;
+    return r ? this.toClientRow(r) : undefined;
+  }
+
+  getClientByLinearId(linearCustomerId: string): ClientRow | undefined {
+    const r = this.db.prepare(`SELECT * FROM clients WHERE linear_customer_id = ?`).get(linearCustomerId) as any;
+    return r ? this.toClientRow(r) : undefined;
+  }
+
+  updateClientLocal(id: number, updates: { weight?: number; notes?: string; contractValue?: number }): void {
+    const parts: string[] = [];
+    const params: any[] = [];
+    if (updates.weight !== undefined) { parts.push("weight = ?"); params.push(updates.weight); }
+    if (updates.notes !== undefined) { parts.push("notes = ?"); params.push(updates.notes); }
+    if (updates.contractValue !== undefined) { parts.push("contract_value = ?"); params.push(updates.contractValue); }
+    if (parts.length === 0) return;
+    parts.push("updated_at = datetime('now')");
+    params.push(id);
+    this.db.prepare(`UPDATE clients SET ${parts.join(", ")} WHERE id = ?`).run(...params);
+  }
+
+  private toClientRow(r: any): ClientRow {
+    return {
+      id: r.id,
+      linearCustomerId: r.linear_customer_id,
+      name: r.name,
+      tier: r.tier ?? undefined,
+      tierId: r.tier_id ?? undefined,
+      status: r.status ?? undefined,
+      contractValue: r.contract_value ?? undefined,
+      revenue: r.revenue ?? undefined,
+      domains: safeJson<string[]>(r.domains_json, []),
+      weight: r.weight,
+      notes: r.notes ?? undefined,
+      logoUrl: r.logo_url ?? undefined,
+      ownerName: r.owner_name ?? undefined,
+      isActive: Boolean(r.is_active),
+      syncedAt: r.synced_at ?? undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  // ─── Projects ───
+
+  upsertProjects(projects: Array<{
+    id: string; name: string; description?: string; state: string;
+    progress: number; startDate?: string; targetDate?: string; url?: string;
+    issueCount: number; completedIssueCount: number;
+    memberIdsJson: string; syncedAt: string;
+  }>): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO projects (id, name, description, state, progress, start_date, target_date, url,
+        issue_count, completed_issue_count, member_ids_json, synced_at, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, description=excluded.description, state=excluded.state,
+        progress=excluded.progress, start_date=excluded.start_date, target_date=excluded.target_date,
+        url=excluded.url, issue_count=excluded.issue_count, completed_issue_count=excluded.completed_issue_count,
+        member_ids_json=excluded.member_ids_json, synced_at=excluded.synced_at, updated_at=datetime('now')
+    `);
+    const tx = this.db.transaction((items: typeof projects) => {
+      for (const p of items) {
+        stmt.run(p.id, p.name, p.description ?? null, p.state, p.progress,
+          p.startDate ?? null, p.targetDate ?? null, p.url ?? null,
+          p.issueCount, p.completedIssueCount, p.memberIdsJson, p.syncedAt);
+      }
+    });
+    tx(projects);
+  }
+
+  getAllProjects(): ProjectRow[] {
+    return (this.db.prepare(`SELECT * FROM projects ORDER BY name`).all() as any[]).map(r => this.toProjectRow(r));
+  }
+
+  getProjectById(id: string): ProjectRow | undefined {
+    const r = this.db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as any;
+    return r ? this.toProjectRow(r) : undefined;
+  }
+
+  getProjectsByState(state: string): ProjectRow[] {
+    return (this.db.prepare(`SELECT * FROM projects WHERE state = ? ORDER BY name`).all(state) as any[]).map(r => this.toProjectRow(r));
+  }
+
+  private toProjectRow(r: any): ProjectRow {
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      state: r.state,
+      progress: r.progress,
+      startDate: r.start_date ?? undefined,
+      targetDate: r.target_date ?? undefined,
+      url: r.url ?? undefined,
+      issueCount: r.issue_count,
+      completedIssueCount: r.completed_issue_count,
+      memberIds: safeJson<string[]>(r.member_ids_json, []),
+      syncedAt: r.synced_at,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
 }
+
+// ─── Row Types ───
+
+export type ClientRow = {
+  id: number;
+  linearCustomerId: string;
+  name: string;
+  tier?: string;
+  tierId?: string;
+  status?: string;
+  contractValue?: number;
+  revenue?: number;
+  domains: string[];
+  weight: number;
+  notes?: string;
+  logoUrl?: string;
+  ownerName?: string;
+  isActive: boolean;
+  syncedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectRow = {
+  id: string;
+  name: string;
+  description?: string;
+  state: string;
+  progress: number;
+  startDate?: string;
+  targetDate?: string;
+  url?: string;
+  issueCount: number;
+  completedIssueCount: number;
+  memberIds: string[];
+  syncedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
