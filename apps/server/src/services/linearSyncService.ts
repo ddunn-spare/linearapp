@@ -88,20 +88,40 @@ export class LinearSyncService {
   async syncCycles(): Promise<void> {
     if (!this.linear.hasKey) return;
     const rawCycles = await this.linear.listCycles(this.cfg.linearTeamKey);
+    if (rawCycles.length === 0) {
+      log.warn("No cycles returned from Linear — check team key or workspace configuration");
+      return;
+    }
     const now = new Date();
-    const cycles: Cycle[] = rawCycles.map(c => ({
-      id: c.id,
-      name: c.name,
-      number: c.number,
-      startsAt: c.startsAt,
-      endsAt: c.endsAt,
-      completedScopeCount: c.completedScopeCount,
-      totalScopeCount: c.scopeCount,
-      progress: c.progress,
-      isActive: new Date(c.startsAt) <= now && now <= new Date(c.endsAt),
-    }));
+    const cycles: Cycle[] = rawCycles.map(c => {
+      const startsAt = new Date(c.startsAt);
+      const endsAt = new Date(c.endsAt);
+      // Use end-of-day for endsAt so the cycle stays active on its last day
+      endsAt.setHours(23, 59, 59, 999);
+      return {
+        id: c.id,
+        name: c.name,
+        number: c.number,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        completedScopeCount: c.completedScopeCount,
+        totalScopeCount: c.scopeCount,
+        progress: c.progress,
+        isActive: startsAt <= now && now <= endsAt,
+      };
+    });
+    const activeCycle = cycles.find(c => c.isActive);
+    if (!activeCycle) {
+      log.warn("No active cycle found — closest upcoming or most recent may be between cycles", {
+        total: cycles.length,
+        mostRecent: cycles[0]?.name,
+        mostRecentEnd: cycles[0]?.endsAt,
+      });
+    } else {
+      log.info("Active cycle identified", { name: activeCycle.name, number: activeCycle.number, progress: activeCycle.progress });
+    }
     this.db.upsertCycles(cycles);
-    log.info("Synced cycles", { count: cycles.length });
+    log.info("Synced cycles", { count: cycles.length, active: activeCycle?.name ?? "none" });
   }
 
   async syncCustomers(): Promise<void> {

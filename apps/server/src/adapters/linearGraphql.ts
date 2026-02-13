@@ -74,7 +74,7 @@ export class LinearGraphqlClient {
           id: string; name?: string; number: number; startsAt: string; endsAt: string;
           completedScopeCount: number; scopeCount: number; progress: number;
         }> } }> };
-      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:createdAt){nodes{id name number startsAt endsAt completedScopeCount scopeCount progress}}}}}`, { teamKey });
+      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:startsAt,sortDirection:Descending){nodes{id name number startsAt endsAt completedScopeCount scopeCount progress}}}}}`, { teamKey });
       return unwrapConnection(data.teams.nodes[0]?.cycles).map(c => ({ ...c, name: c.name || `Cycle ${c.number}` }));
     } catch {
       return []; // Cycles are optional — don't fail sync
@@ -341,7 +341,7 @@ export class LinearGraphqlClient {
         teams: { nodes: Array<{ cycles: { nodes: Array<{
           id: string; name?: string; number: number; startsAt: string; endsAt: string;
         }> } }> };
-      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:createdAt){nodes{id name number startsAt endsAt}}}}}`, { teamKey });
+      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:startsAt,sortDirection:Descending){nodes{id name number startsAt endsAt}}}}}`, { teamKey });
       return unwrapConnection(data.teams.nodes[0]?.cycles).map(c => ({
         id: c.id,
         name: c.name || `Cycle ${c.number}`,
