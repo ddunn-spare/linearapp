@@ -1,0 +1,12 @@
+{
+  "name": "linearapp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm run --parallel dev",
+    "dev:server": "pnpm --filter @linearapp/server dev",
+    "dev:web": "pnpm --filter @linearapp/web dev",
+    "build": "pnpm run --parallel build",
+    "typecheck": "pnpm run --parallel typecheck"
+  }
+}
