@@ -141,16 +141,39 @@ export class ApprovalManager {
     _preview: ActionPreviewField[],
   ): string {
     switch (toolName) {
-      case "demo_create_issue": {
+      case "create_issue": {
         const title = String(args.title || "Untitled");
         const parts: string[] = [];
-        if (args.priority !== undefined) {
+        if (args.priority !== undefined && args.priority !== null) {
           const labels = ["None", "Urgent", "High", "Medium", "Low"];
-          parts.push(`Priority: ${labels[Number(args.priority)] || "None"}`);
+          parts.push(labels[Number(args.priority)] || "None");
         }
         if (args.assigneeName) parts.push(`Assignee: ${String(args.assigneeName)}`);
         const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
         return `Create issue: ${title}${suffix}`;
+      }
+      case "update_issue": {
+        const identifier = String(args.issueId || "unknown");
+        const changedFields: string[] = [];
+        if (args.title !== undefined && args.title !== null) changedFields.push("title");
+        if (args.description !== undefined && args.description !== null) changedFields.push("description");
+        if (args.priority !== undefined && args.priority !== null) changedFields.push("priority");
+        if (args.assigneeName !== undefined && args.assigneeName !== null) changedFields.push("assignee");
+        if (args.status !== undefined && args.status !== null) changedFields.push("status");
+        if (args.labelNames && Array.isArray(args.labelNames) && args.labelNames.length > 0) changedFields.push("labels");
+        if (args.projectName !== undefined && args.projectName !== null) changedFields.push("project");
+        const fieldList = changedFields.length > 0 ? changedFields.join(", ") : "fields";
+        return `Update ${identifier}: ${fieldList}`;
+      }
+      case "delete_issue": {
+        const identifier = String(args.issueId || "unknown");
+        return `Delete issue: ${identifier}`;
+      }
+      case "add_comment": {
+        const identifier = String(args.issueId || "unknown");
+        const body = String(args.body || "");
+        const truncated = body.length > 80 ? body.slice(0, 80) + "..." : body;
+        return `Comment on ${identifier}: ${truncated}`;
       }
       default:
         return `Execute ${toolName}`;
@@ -162,8 +185,14 @@ export class ApprovalManager {
    */
   private buildResultSummary(toolName: string, parsed: Record<string, unknown>): string {
     switch (toolName) {
-      case "demo_create_issue":
-        return `Issue created: ${parsed.identifier || parsed.issueId || "unknown"}`;
+      case "create_issue":
+        return `Created ${parsed.identifier || parsed.issueId || "unknown"}: ${parsed.title || ""}`;
+      case "update_issue":
+        return `Updated ${parsed.identifier || parsed.issueId || "unknown"}`;
+      case "delete_issue":
+        return `Deleted ${parsed.identifier || "unknown"}`;
+      case "add_comment":
+        return `Comment added to ${parsed.issueIdentifier || "unknown"}`;
       default:
         return parsed.success ? "Action completed successfully" : JSON.stringify(parsed).slice(0, 200);
     }

@@ -1,14 +1,21 @@
 import type OpenAI from "openai";
-import type { ChatMessage, ChatToolCall, ChatStreamEvent } from "@linearapp/shared";
+import type { ChatMessage, ChatToolCall, ChatStreamEvent, SkillMatch } from "@linearapp/shared";
 import type { StateDb } from "../db";
+import type { LinearGraphqlClient } from "../adapters/linearGraphql";
+import type { AppConfig } from "../config";
 import type { OpenAIClient } from "../adapters/openaiClient";
 import type { ApprovalManager } from "./approvalManager";
+import type { SkillService } from "./skillService";
 import { getToolDefinitions, createToolHandlers, isWriteTool, getWriteToolSummaries, type ToolHandler } from "../tools/index";
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(skillTemplates?: string[]): string {
   const writeTools = getWriteToolSummaries();
   const writeSection = writeTools.length > 0
     ? `\n\nYou can also take actions on behalf of the user (these require user approval before execution):\n${writeTools.map(t => `- ${t.description}`).join("\n")}\n\nWhen you want to take an action, use the appropriate tool. The user will see a preview of what will change and can approve or decline. If they decline, acknowledge naturally and move on — do not ask follow-up questions about the declined action. If they approve, the action will execute and you'll see the result.`
+    : "";
+
+  const skillsSection = skillTemplates?.length
+    ? `\n\n--- Active Skills ---\n${skillTemplates.join("\n\n")}`
     : "";
 
   return `You are Team Hub AI, an intelligent assistant for the EAM engineering team. You help manage work using a "Shaped Kanban with OKR Guardrails" methodology.
@@ -29,23 +36,30 @@ Key principles you follow:
 - Use RICE scoring to prioritize objectively
 - Make work visible — surface blockers and risks proactively
 
-When answering questions, use your available tools to get real data. Don't guess — call the appropriate tool and base your answers on actual data.`;
+When answering questions, use your available tools to get real data. Don't guess — call the appropriate tool and base your answers on actual data.${skillsSection}`;
 }
 
 export class ChatService {
   private toolHandlers: Record<string, ToolHandler>;
   private approvalManager: ApprovalManager | null = null;
+  private skillService: SkillService | null = null;
 
   constructor(
     private readonly db: StateDb,
     private readonly openai: OpenAIClient,
+    linear: LinearGraphqlClient,
+    cfg: AppConfig,
     trackedLinearIds?: Set<string>,
   ) {
-    this.toolHandlers = createToolHandlers(db, trackedLinearIds);
+    this.toolHandlers = createToolHandlers(db, linear, cfg, trackedLinearIds);
   }
 
   setApprovalManager(manager: ApprovalManager): void {
     this.approvalManager = manager;
+  }
+
+  setSkillService(service: SkillService): void {
+    this.skillService = service;
   }
 
   /**
@@ -186,10 +200,24 @@ export class ChatService {
     };
     this.db.addMessage(userMsg);
 
+    // Match skills before building message history
+    let matchedSkills: SkillMatch[] = [];
+    let skillTemplates: string[] = [];
+    if (this.skillService) {
+      try {
+        const result = await this.skillService.matchSkills(userMessage);
+        matchedSkills = result.matches;
+        skillTemplates = result.templates;
+        if (matchedSkills.length > 0) {
+          yield { type: "skills_matched", skills: matchedSkills };
+        }
+      } catch { /* skill matching is best-effort */ }
+    }
+
     // Build message history
     const history = this.db.getMessages(conversationId);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: buildSystemPrompt() },
+      { role: "system", content: buildSystemPrompt(skillTemplates) },
       ...history.map(m => {
         if (m.role === "user") return { role: "user" as const, content: m.content };
         if (m.role === "assistant") return { role: "assistant" as const, content: m.content };
@@ -338,6 +366,7 @@ export class ChatService {
       role: "assistant",
       content: fullContent,
       toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+      matchedSkills: matchedSkills.length > 0 ? matchedSkills : undefined,
       createdAt: new Date().toISOString(),
     };
     this.db.addMessage(assistantMsg);

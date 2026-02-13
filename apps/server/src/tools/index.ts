@@ -1,6 +1,8 @@
 import type { StateDb } from "../db";
+import type { LinearGraphqlClient } from "../adapters/linearGraphql";
+import type { AppConfig } from "../config";
 import type OpenAI from "openai";
-import type { ActionPreviewField } from "@linearapp/shared";
+import type { ActionPreviewField, ActionCategory } from "@linearapp/shared";
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<string>;
 
@@ -8,6 +10,8 @@ type ToolMetadata = {
   requiresApproval: boolean;
   category: "query" | "action";
   descriptionForUser: string;
+  destructive?: boolean;
+  actionCategory?: ActionCategory;
   generatePreview?: (args: Record<string, unknown>) => ActionPreviewField[];
 };
 
@@ -24,20 +28,70 @@ const toolMetadata = new Map<string, ToolMetadata>([
   ["recommend_assignee", { requiresApproval: false, category: "query", descriptionForUser: "Recommend the best assignee for an issue" }],
   ["get_dashboard_summary", { requiresApproval: false, category: "query", descriptionForUser: "Get team dashboard summary" }],
   ["query_data", { requiresApproval: false, category: "query", descriptionForUser: "Run a read-only SQL query" }],
-  ["demo_create_issue", {
+  ["create_issue", {
     requiresApproval: true,
     category: "action",
+    actionCategory: "linear",
     descriptionForUser: "Create a new issue in Linear",
     generatePreview: (args: Record<string, unknown>) => {
       const fields: ActionPreviewField[] = [];
       fields.push({ field: "Title", newValue: String(args.title || "") });
-      if (args.description) fields.push({ field: "Description", newValue: String(args.description) });
-      if (args.priority !== undefined) {
+      if (args.description) fields.push({ field: "Description", newValue: String(args.description).slice(0, 100) + (String(args.description).length > 100 ? "..." : "") });
+      if (args.priority !== undefined && args.priority !== null) {
         const labels = ["None", "Urgent", "High", "Medium", "Low"];
         fields.push({ field: "Priority", newValue: labels[Number(args.priority)] || "None" });
       }
       if (args.assigneeName) fields.push({ field: "Assignee", newValue: String(args.assigneeName) });
+      if (args.labelNames && Array.isArray(args.labelNames) && args.labelNames.length > 0) {
+        fields.push({ field: "Labels", newValue: args.labelNames.join(", ") });
+      }
+      if (args.projectName) fields.push({ field: "Project", newValue: String(args.projectName) });
       return fields;
+    },
+  }],
+  ["update_issue", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Update an existing Linear issue",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Issue", newValue: String(args.issueId || "") });
+      if (args.title !== undefined && args.title !== null) fields.push({ field: "Title", oldValue: "(current)", newValue: String(args.title) });
+      if (args.description !== undefined && args.description !== null) fields.push({ field: "Description", oldValue: "(current)", newValue: String(args.description).slice(0, 100) + (String(args.description).length > 100 ? "..." : "") });
+      if (args.priority !== undefined && args.priority !== null) {
+        const labels = ["None", "Urgent", "High", "Medium", "Low"];
+        fields.push({ field: "Priority", oldValue: "(current)", newValue: labels[Number(args.priority)] || "None" });
+      }
+      if (args.assigneeName !== undefined && args.assigneeName !== null) fields.push({ field: "Assignee", oldValue: "(current)", newValue: String(args.assigneeName) });
+      if (args.status !== undefined && args.status !== null) fields.push({ field: "Status", oldValue: "(current)", newValue: String(args.status) });
+      if (args.labelNames && Array.isArray(args.labelNames) && args.labelNames.length > 0) {
+        fields.push({ field: "Labels", oldValue: "(current)", newValue: args.labelNames.join(", ") });
+      }
+      if (args.projectName !== undefined && args.projectName !== null) fields.push({ field: "Project", oldValue: "(current)", newValue: String(args.projectName) });
+      return fields;
+    },
+  }],
+  ["delete_issue", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    destructive: true,
+    descriptionForUser: "Delete a Linear issue permanently",
+    generatePreview: (args: Record<string, unknown>) => {
+      return [{ field: "Issue", newValue: String(args.issueId || "") }];
+    },
+  }],
+  ["add_comment", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Add a comment to a Linear issue",
+    generatePreview: (args: Record<string, unknown>) => {
+      return [
+        { field: "Issue", newValue: String(args.issueId || "") },
+        { field: "Comment", newValue: String(args.body || "") },
+      ];
     },
   }],
 ]);
@@ -59,6 +113,14 @@ export function getWriteToolSummaries(): { name: string; description: string }[]
     }
   }
   return results;
+}
+
+export function getToolActionCategory(toolName: string): ActionCategory | undefined {
+  return toolMetadata.get(toolName)?.actionCategory;
+}
+
+export function isDestructiveTool(toolName: string): boolean {
+  return toolMetadata.get(toolName)?.destructive === true;
 }
 
 export function generatePreviewForTool(toolName: string, args: Record<string, unknown>): ActionPreviewField[] {
@@ -88,9 +150,9 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
           type: "object",
           properties: {
             query: { type: "string", description: "Search query" },
-            limit: { type: "number", description: "Max results (default 10)" },
+            limit: { type: ["number", "null"], description: "Max results (default 10)" },
           },
-          required: ["query"],
+          required: ["query", "limit"],
           additionalProperties: false,
         },
       },
@@ -147,10 +209,10 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
         parameters: {
           type: "object",
           properties: {
-            authorLogin: { type: "string", description: "Filter by author GitHub username" },
-            state: { type: "string", enum: ["open", "closed", "merged"], description: "Filter by PR state" },
+            authorLogin: { type: ["string", "null"], description: "Filter by author GitHub username" },
+            state: { type: ["string", "null"], enum: ["open", "closed", "merged", null], description: "Filter by PR state" },
           },
-          required: [],
+          required: ["authorLogin", "state"],
           additionalProperties: false,
         },
       },
@@ -250,18 +312,76 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
     {
       type: "function",
       function: {
-        name: "demo_create_issue",
-        description: "Create a new issue in Linear (demo tool for testing approval flow)",
+        name: "create_issue",
+        description: "Create a new issue in Linear with title, description, priority, assignee, labels, and project",
         strict: true,
         parameters: {
           type: "object",
           properties: {
             title: { type: "string", description: "Issue title" },
-            description: { type: "string", description: "Issue description" },
-            priority: { type: "number", description: "Priority (0=none, 1=urgent, 2=high, 3=medium, 4=low)", enum: [0, 1, 2, 3, 4] },
-            assigneeName: { type: "string", description: "Name of the person to assign" },
+            description: { type: ["string", "null"], description: "Issue description (supports markdown)" },
+            priority: { type: ["number", "null"], description: "Priority (0=none, 1=urgent, 2=high, 3=medium, 4=low)", enum: [0, 1, 2, 3, 4, null] },
+            assigneeName: { type: ["string", "null"], description: "Name of the person to assign (resolved to ID)" },
+            labelNames: { type: ["array", "null"], items: { type: "string" }, description: "Label names to apply" },
+            projectName: { type: ["string", "null"], description: "Project name to assign to" },
           },
-          required: ["title"],
+          required: ["title", "description", "priority", "assigneeName", "labelNames", "projectName"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "update_issue",
+        description: "Update one or more fields on an existing Linear issue (status, priority, assignee, labels, etc.)",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            issueId: { type: "string", description: "Issue ID or identifier (e.g. ENG-123)" },
+            title: { type: ["string", "null"], description: "New title" },
+            description: { type: ["string", "null"], description: "New description" },
+            priority: { type: ["number", "null"], description: "New priority (0=none, 1=urgent, 2=high, 3=medium, 4=low)", enum: [0, 1, 2, 3, 4, null] },
+            assigneeName: { type: ["string", "null"], description: "New assignee name" },
+            status: { type: ["string", "null"], description: "New status name (e.g. In Progress, Done)" },
+            labelNames: { type: ["array", "null"], items: { type: "string" }, description: "New label names (replaces existing)" },
+            projectName: { type: ["string", "null"], description: "New project name" },
+          },
+          required: ["issueId", "title", "description", "priority", "assigneeName", "status", "labelNames", "projectName"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "delete_issue",
+        description: "Permanently delete a Linear issue. This action cannot be undone.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            issueId: { type: "string", description: "Issue ID or identifier (e.g. ENG-123)" },
+          },
+          required: ["issueId"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "add_comment",
+        description: "Add a comment to a Linear issue (supports markdown formatting)",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            issueId: { type: "string", description: "Issue ID or identifier (e.g. ENG-123)" },
+            body: { type: "string", description: "Comment body (supports markdown)" },
+          },
+          required: ["issueId", "body"],
           additionalProperties: false,
         },
       },
@@ -269,11 +389,61 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
   ];
 }
 
-export function createToolHandlers(db: StateDb, trackedLinearIds?: Set<string>): Record<string, ToolHandler> {
+export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>): Record<string, ToolHandler> {
   const filterMembers = (members: ReturnType<StateDb["getMembers"]>) =>
     trackedLinearIds && trackedLinearIds.size > 0
       ? members.filter(m => m.linearUserId && trackedLinearIds.has(m.linearUserId))
       : members;
+
+  /**
+   * Resolve an issue identifier (e.g. "ENG-123") to a UUID.
+   * If the input does not contain "-", assumes it's already a UUID.
+   */
+  const resolveIssueId = (input: string): string => {
+    if (!input.includes("-")) return input;
+    const results = db.searchIssues(input, 1);
+    const first = results[0];
+    if (first && first.snapshot.identifier.toLowerCase() === input.toLowerCase()) {
+      return first.snapshot.issueId;
+    }
+    if (first) return first.snapshot.issueId;
+    return input; // Fall through -- Linear API may still resolve it
+  };
+
+  /**
+   * Resolve a member name to a Linear user ID (case-insensitive partial match).
+   */
+  const resolveMemberByName = (name: string): string | undefined => {
+    const members = db.getMembers();
+    const lower = name.toLowerCase();
+    const exact = members.find(m => m.name.toLowerCase() === lower);
+    if (exact) return exact.linearUserId;
+    const partial = members.find(m => m.name.toLowerCase().includes(lower));
+    return partial?.linearUserId;
+  };
+
+  /**
+   * Resolve a project name to a project ID.
+   */
+  const resolveProjectByName = async (name: string): Promise<string | undefined> => {
+    const projects = await linear.listProjects(cfg.linearTeamKey);
+    const lower = name.toLowerCase();
+    const match = projects.find(p => p.name.toLowerCase() === lower)
+      || projects.find(p => p.name.toLowerCase().includes(lower));
+    return match?.id;
+  };
+
+  /**
+   * Resolve a status name to a state ID.
+   */
+  const resolveStatusByName = async (name: string): Promise<string | undefined> => {
+    const statuses = await linear.listStatuses(cfg.linearTeamKey);
+    const lower = name.toLowerCase();
+    const match = statuses.find(s => s.name.toLowerCase() === lower)
+      || statuses.find(s => s.name.toLowerCase().includes(lower));
+    return match?.id;
+  };
+
   return {
     search_issues: async (args) => {
       const query = String(args.query || "");
@@ -464,15 +634,116 @@ export function createToolHandlers(db: StateDb, trackedLinearIds?: Set<string>):
       }
     },
 
-    demo_create_issue: async (args) => {
-      // Demo handler -- simulates creating an issue
-      const fakeId = `DEMO-${Math.floor(Math.random() * 1000)}`;
+    create_issue: async (args) => {
+      const title = String(args.title || "");
+      const description = args.description ? String(args.description) : undefined;
+      const priority = args.priority !== undefined && args.priority !== null ? Number(args.priority) : undefined;
+
+      // Resolve assignee name to ID
+      let assigneeId: string | undefined;
+      if (args.assigneeName) {
+        assigneeId = resolveMemberByName(String(args.assigneeName));
+      }
+
+      // Resolve label names to IDs
+      let labelIds: string[] | undefined;
+      if (args.labelNames && Array.isArray(args.labelNames) && args.labelNames.length > 0) {
+        const resolved = await linear.listLabelsByName(args.labelNames.map(String));
+        labelIds = resolved.map(l => l.id);
+      }
+
+      // Resolve project name to ID
+      let projectId: string | undefined;
+      if (args.projectName) {
+        projectId = await resolveProjectByName(String(args.projectName));
+      }
+
+      // Get team ID
+      const teamId = await linear.getTeamId(cfg.linearTeamKey);
+
+      const issue = await linear.createIssue({
+        teamId,
+        title,
+        description,
+        priority,
+        assigneeId,
+        labelIds,
+        projectId,
+      });
+
       return JSON.stringify({
         success: true,
-        issueId: fakeId,
-        identifier: fakeId,
-        title: args.title,
-        url: `https://linear.app/team/issue/${fakeId}`,
+        issueId: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+      });
+    },
+
+    update_issue: async (args) => {
+      const rawId = String(args.issueId || "");
+      const issueId = resolveIssueId(rawId);
+
+      const input: Record<string, unknown> = {};
+
+      if (args.title !== undefined && args.title !== null) input.title = String(args.title);
+      if (args.description !== undefined && args.description !== null) input.description = String(args.description);
+      if (args.priority !== undefined && args.priority !== null) input.priority = Number(args.priority);
+
+      if (args.assigneeName !== undefined && args.assigneeName !== null) {
+        const assigneeId = resolveMemberByName(String(args.assigneeName));
+        if (assigneeId) input.assigneeId = assigneeId;
+      }
+
+      if (args.status !== undefined && args.status !== null) {
+        const stateId = await resolveStatusByName(String(args.status));
+        if (stateId) input.stateId = stateId;
+      }
+
+      if (args.labelNames && Array.isArray(args.labelNames) && args.labelNames.length > 0) {
+        const resolved = await linear.listLabelsByName(args.labelNames.map(String));
+        input.labelIds = resolved.map(l => l.id);
+      }
+
+      if (args.projectName !== undefined && args.projectName !== null) {
+        const projectId = await resolveProjectByName(String(args.projectName));
+        if (projectId) input.projectId = projectId;
+      }
+
+      const result = await linear.updateIssue(issueId, input);
+
+      return JSON.stringify({
+        success: result.success,
+        issueId: result.issue?.id || issueId,
+        identifier: result.issue?.identifier || rawId,
+        url: result.issue?.url,
+      });
+    },
+
+    delete_issue: async (args) => {
+      const rawId = String(args.issueId || "");
+      const issueId = resolveIssueId(rawId);
+
+      const result = await linear.deleteIssue(issueId);
+
+      return JSON.stringify({
+        success: result.success,
+        identifier: rawId,
+      });
+    },
+
+    add_comment: async (args) => {
+      const rawId = String(args.issueId || "");
+      const issueId = resolveIssueId(rawId);
+      const body = String(args.body || "");
+
+      const result = await linear.addIssueComment(issueId, body);
+
+      return JSON.stringify({
+        success: true,
+        commentId: result.id,
+        issueIdentifier: rawId,
+        url: result.url,
       });
     },
   };
