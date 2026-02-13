@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS clients (
   notes TEXT,
   logo_url TEXT,
   owner_name TEXT,
+  issue_count INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   synced_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -277,6 +278,9 @@ export class StateDb {
 
     // Migration: add category column to action_proposals
     try { this.db.exec(`ALTER TABLE action_proposals ADD COLUMN category TEXT NOT NULL DEFAULT 'internal'`); } catch { /* column already exists */ }
+
+    // Migration: add issue_count column to clients
+    try { this.db.exec(`ALTER TABLE clients ADD COLUMN issue_count INTEGER NOT NULL DEFAULT 0`); } catch { /* column already exists */ }
   }
 
   close() {
@@ -1010,23 +1014,25 @@ export class StateDb {
     domainsJson: string;
     logoUrl?: string;
     ownerName?: string;
+    issueCount?: number;
     isActive: boolean;
     syncedAt: string;
   }): void {
     this.db.prepare(`
-      INSERT INTO clients (linear_customer_id, name, tier, tier_id, status, revenue, domains_json, logo_url, owner_name, is_active, synced_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO clients (linear_customer_id, name, tier, tier_id, status, revenue, domains_json, logo_url, owner_name, issue_count, is_active, synced_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       ON CONFLICT(linear_customer_id) DO UPDATE SET
         name=excluded.name, tier=excluded.tier, tier_id=excluded.tier_id,
         status=excluded.status, revenue=excluded.revenue,
         domains_json=excluded.domains_json, logo_url=excluded.logo_url,
-        owner_name=excluded.owner_name, is_active=excluded.is_active,
+        owner_name=excluded.owner_name, issue_count=excluded.issue_count,
+        is_active=excluded.is_active,
         synced_at=excluded.synced_at, updated_at=datetime('now')
     `).run(
       client.linearCustomerId, client.name, client.tier ?? null, client.tierId ?? null,
       client.status ?? null, client.revenue ?? null, client.domainsJson,
-      client.logoUrl ?? null, client.ownerName ?? null, client.isActive ? 1 : 0,
-      client.syncedAt,
+      client.logoUrl ?? null, client.ownerName ?? null, client.issueCount ?? 0,
+      client.isActive ? 1 : 0, client.syncedAt,
     );
   }
 
@@ -1076,6 +1082,7 @@ export class StateDb {
       notes: r.notes ?? undefined,
       logoUrl: r.logo_url ?? undefined,
       ownerName: r.owner_name ?? undefined,
+      issueCount: r.issue_count ?? 0,
       isActive: Boolean(r.is_active),
       syncedAt: r.synced_at ?? undefined,
       createdAt: r.created_at,
@@ -1160,6 +1167,7 @@ export type ClientRow = {
   notes?: string;
   logoUrl?: string;
   ownerName?: string;
+  issueCount: number;
   isActive: boolean;
   syncedAt?: string;
   createdAt: string;

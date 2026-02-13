@@ -1,7 +1,7 @@
 import type {
   ActionProposal,
   BoardState, BoardMoveResult, ChatConversation, ChatMessage, ChatStreamEvent,
-  Cycle, CycleDetail, DashboardData, IssueWithState, OkrDoc,
+  Client, Cycle, CycleDetail, DashboardData, IssueWithState, OkrDoc,
   OkrAllocationView, PullRequest, PrReview, RiceScore, SyncStatus,
   TeamMember, TrackedMemberStatus, VelocityResponse, WipLimit,
 } from "@linearapp/shared";
@@ -148,6 +148,17 @@ export const getVelocitySummary = () => request<{ ok: boolean; summary: string }
 
 // ─── Team Config ───
 export const getTrackedMembers = () => request<{ trackedMembers: TrackedMemberStatus[] }>("/team-config");
+
+// ─── Clients/Customers ───
+export const getClients = (filters?: { tier?: string; active?: string }) => {
+  const params = new URLSearchParams();
+  if (filters?.tier) params.set("tier", filters.tier);
+  if (filters?.active) params.set("active", filters.active);
+  return request<{ ok: boolean; data: Client[] }>(`/clients?${params}`);
+};
+export const getClient = (id: number) => request<{ ok: boolean; data: Client }>(`/clients/${id}`);
+export const updateClient = (id: number, data: { weight?: number; notes?: string; contractValue?: number }) =>
+  request<{ ok: boolean; data: Client }>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 
 // ─── Health ───
 export const getHealth = () => request<{ status: string; mode: string }>("/health");
