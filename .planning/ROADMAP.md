@@ -46,12 +46,13 @@ Plans:
   3. User can ask the agent to manage projects, cycles, and labels in Linear
   4. User can ask the agent to perform bulk operations on multiple issues at once with a preview of all changes before approval
   5. User can ask the agent to create and update OKRs and key results
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 02-01: Core Linear issue tools (create, update, delete, comment)
-- [ ] 02-02: Linear workflow tools (projects, cycles, labels, bulk operations)
-- [ ] 02-03: Internal OKR tools (create, update OKRs and key results)
+- [ ] 02-01-PLAN.md -- Linear adapter mutations and core issue write tools (create, update, delete, comment) (Wave 1)
+- [ ] 02-02-PLAN.md -- Linear workflow tools (projects, cycles, labels) and bulk update operations (Wave 2)
+- [ ] 02-03-PLAN.md -- OKR write tools (CRUD, key results, issue linking) with category tagging (Wave 2)
+- [ ] 02-04-PLAN.md -- Enhanced approval card rendering and end-to-end verification (Wave 3)
 
 ### Phase 3: GitHub Write Actions
 **Goal**: Agent can create and manage pull requests, issues, and comments in GitHub through the approval flow
@@ -91,6 +92,6 @@ Note: Phases 2 and 3 both depend on Phase 1 but not on each other. They are orde
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Approval Infrastructure & Flow | 3/3 | ✓ Complete | 2026-02-12 |
-| 2. Linear & Internal Write Actions | 0/3 | Not started | - |
+| 2. Linear & Internal Write Actions | 0/4 | Not started | - |
 | 3. GitHub Write Actions | 0/1 | Not started | - |
 | 4. Discovery & Rendering | 0/2 | Not started | - |
