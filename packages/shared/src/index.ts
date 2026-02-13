@@ -452,6 +452,47 @@ export type TrackedMemberStatus = TrackedMember & {
   topIssue?: { identifier: string; title: string; boardColumn: BoardColumnId };
 };
 
+// ─── Clients ───
+
+export type Client = {
+  id: number;
+  linearCustomerId: string;
+  name: string;
+  tier?: string;
+  tierId?: string;
+  status?: string;
+  contractValue?: number;
+  revenue?: number;
+  domains: string[];
+  weight: number;
+  notes?: string;
+  logoUrl?: string;
+  ownerName?: string;
+  isActive: boolean;
+  syncedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// ─── Projects (detailed) ───
+
+export type Project = {
+  id: string;
+  name: string;
+  description?: string;
+  state: string;
+  progress: number;
+  startDate?: string;
+  targetDate?: string;
+  url?: string;
+  issueCount: number;
+  completedIssueCount: number;
+  memberIds: string[];
+  syncedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 // ─── API Response wrappers ───
 
 export type ApiResponse<T> = {

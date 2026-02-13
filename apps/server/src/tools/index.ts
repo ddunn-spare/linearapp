@@ -19,7 +19,8 @@ const toolMetadata = new Map<string, ToolMetadata>([
   ["search_issues", { requiresApproval: false, category: "query", descriptionForUser: "Search issues by keyword" }],
   ["get_issue_detail", { requiresApproval: false, category: "query", descriptionForUser: "Get details of a specific issue" }],
   ["get_team_workload", { requiresApproval: false, category: "query", descriptionForUser: "Get current workload for all team members" }],
-  ["get_cycle_stats", { requiresApproval: false, category: "query", descriptionForUser: "Get current cycle statistics" }],
+  ["get_cycle_stats", { requiresApproval: false, category: "query", descriptionForUser: "Get cycle statistics with member breakdown" }],
+  ["list_cycles", { requiresApproval: false, category: "query", descriptionForUser: "List all cycles with progress and dates" }],
   ["get_okrs", { requiresApproval: false, category: "query", descriptionForUser: "Get all OKRs with progress" }],
   ["get_github_prs", { requiresApproval: false, category: "query", descriptionForUser: "Get pull requests" }],
   ["find_similar_issues", { requiresApproval: false, category: "query", descriptionForUser: "Find issues similar to a query" }],
@@ -28,6 +29,23 @@ const toolMetadata = new Map<string, ToolMetadata>([
   ["recommend_assignee", { requiresApproval: false, category: "query", descriptionForUser: "Recommend the best assignee for an issue" }],
   ["get_dashboard_summary", { requiresApproval: false, category: "query", descriptionForUser: "Get team dashboard summary" }],
   ["query_data", { requiresApproval: false, category: "query", descriptionForUser: "Run a read-only SQL query" }],
+  ["get_clients", { requiresApproval: false, category: "query", descriptionForUser: "List clients/customers with tier and contract info" }],
+  ["list_projects", { requiresApproval: false, category: "query", descriptionForUser: "List all projects with progress and issue counts" }],
+  ["get_project_detail", { requiresApproval: false, category: "query", descriptionForUser: "Get project details with all issues in that project" }],
+  ["update_client_weight", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "internal",
+    descriptionForUser: "Update a client's weight, notes, or contract value",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Client ID", newValue: String(args.clientId || "") });
+      if (args.weight !== undefined && args.weight !== null) fields.push({ field: "Weight", newValue: String(args.weight) });
+      if (args.notes !== undefined && args.notes !== null) fields.push({ field: "Notes", newValue: String(args.notes).slice(0, 100) });
+      if (args.contractValue !== undefined && args.contractValue !== null) fields.push({ field: "Contract Value", newValue: String(args.contractValue) });
+      return fields;
+    },
+  }],
   ["create_issue", {
     requiresApproval: true,
     category: "action",
@@ -341,7 +359,23 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
       type: "function",
       function: {
         name: "get_cycle_stats",
-        description: "Get current cycle statistics including progress, burndown, and member breakdown",
+        description: "Get cycle statistics including progress, member breakdown by assignee. Pass cycleId for a specific cycle, or null for the active cycle.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            cycleId: { type: ["string", "null"], description: "Cycle ID (null = active cycle)" },
+          },
+          required: ["cycleId"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "list_cycles",
+        description: "List all cycles with name, dates, progress, and active status",
         strict: true,
         parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
       },
@@ -460,6 +494,74 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
             sql: { type: "string", description: "SQL SELECT query to execute" },
           },
           required: ["sql"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_clients",
+        description: "List clients/customers from Linear with tier, status, weight, and contract info",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            tier: { type: ["string", "null"], description: "Filter by tier name" },
+            activeOnly: { type: ["boolean", "null"], description: "Only show active clients (default true)" },
+          },
+          required: ["tier", "activeOnly"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "list_projects",
+        description: "List all projects with name, state, progress, issue counts, and dates",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            state: { type: ["string", "null"], description: "Filter by project state (e.g. started, planned, completed)" },
+          },
+          required: ["state"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_project_detail",
+        description: "Get detailed project information including all issues in the project",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            projectId: { type: "string", description: "Project ID" },
+          },
+          required: ["projectId"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "update_client_weight",
+        description: "Update a client's weight (priority multiplier), notes, or contract value",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            clientId: { type: "number", description: "Client ID (local database ID)" },
+            weight: { type: ["number", "null"], description: "Priority weight (0.1-10.0, default 1.0)" },
+            notes: { type: ["string", "null"], description: "Internal notes about this client" },
+            contractValue: { type: ["number", "null"], description: "Contract value in dollars" },
+          },
+          required: ["clientId", "weight", "notes", "contractValue"],
           additionalProperties: false,
         },
       },
@@ -917,14 +1019,40 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
       return JSON.stringify(result);
     },
 
-    get_cycle_stats: async () => {
-      const cycle = db.getActiveCycle();
-      if (!cycle) return JSON.stringify({ error: "No active cycle" });
+    get_cycle_stats: async (args) => {
+      const cycleId = args.cycleId ? String(args.cycleId) : null;
+      const cycle = cycleId ? db.getCycleById(cycleId) : db.getActiveCycle();
+      if (!cycle) return JSON.stringify({ error: cycleId ? "Cycle not found" : "No active cycle found — cycles may not be synced or the team may be between cycles" });
       const issues = db.getIssuesByCycle(cycle.id);
       const completed = issues.filter(i => i.snapshot.boardColumn === "done").length;
       const inProgress = issues.filter(i => i.snapshot.boardColumn === "in_progress" || i.snapshot.boardColumn === "in_review").length;
+
+      const now = new Date();
+      const start = new Date(cycle.startsAt);
+      const end = new Date(cycle.endsAt);
+      const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysRemaining = Math.max(0, totalDays - elapsedDays);
+
+      // Per-member breakdown
+      const memberMap = new Map<string, { name: string; assigned: number; completed: number; inProgress: number; todo: number }>();
+      for (const i of issues) {
+        const assigneeId = i.snapshot.assigneeId || "unassigned";
+        const assigneeName = i.snapshot.assigneeName || "Unassigned";
+        if (!memberMap.has(assigneeId)) {
+          memberMap.set(assigneeId, { name: assigneeName, assigned: 0, completed: 0, inProgress: 0, todo: 0 });
+        }
+        const m = memberMap.get(assigneeId)!;
+        m.assigned++;
+        if (i.snapshot.boardColumn === "done") m.completed++;
+        else if (i.snapshot.boardColumn === "in_progress" || i.snapshot.boardColumn === "in_review") m.inProgress++;
+        else m.todo++;
+      }
+
       return JSON.stringify({
+        id: cycle.id,
         name: cycle.name,
+        number: cycle.number,
         progress: Math.round(cycle.progress * 100),
         totalIssues: issues.length,
         completed,
@@ -932,7 +1060,112 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
         remaining: issues.length - completed,
         startsAt: cycle.startsAt,
         endsAt: cycle.endsAt,
+        totalDays,
+        elapsedDays,
+        daysRemaining,
+        isActive: cycle.isActive,
+        completedScopeCount: cycle.completedScopeCount,
+        totalScopeCount: cycle.totalScopeCount,
+        memberBreakdown: Array.from(memberMap.entries()).map(([memberId, stats]) => ({
+          memberId, ...stats,
+        })),
       });
+    },
+
+    list_cycles: async () => {
+      const cycles = db.getAllCycles();
+      const now = new Date();
+      return JSON.stringify(cycles.map(c => {
+        const start = new Date(c.startsAt);
+        const end = new Date(c.endsAt);
+        const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const daysRemaining = Math.max(0, totalDays - elapsedDays);
+        return {
+          id: c.id,
+          name: c.name,
+          number: c.number,
+          startsAt: c.startsAt,
+          endsAt: c.endsAt,
+          progress: Math.round(c.progress * 100),
+          completedScopeCount: c.completedScopeCount,
+          totalScopeCount: c.totalScopeCount,
+          isActive: c.isActive,
+          totalDays,
+          daysRemaining,
+        };
+      }));
+    },
+
+    get_clients: async (args) => {
+      const tier = args.tier ? String(args.tier) : undefined;
+      const activeOnly = args.activeOnly !== false;
+      const clients = db.getClients({ tier, isActive: activeOnly ? true : undefined });
+      return JSON.stringify(clients.map(c => ({
+        id: c.id,
+        name: c.name,
+        tier: c.tier,
+        status: c.status,
+        weight: c.weight,
+        contractValue: c.contractValue,
+        revenue: c.revenue,
+        domains: c.domains,
+        ownerName: c.ownerName,
+        notes: c.notes,
+        isActive: c.isActive,
+      })));
+    },
+
+    list_projects: async (args) => {
+      const state = args.state ? String(args.state) : null;
+      const projects = state ? db.getProjectsByState(state) : db.getAllProjects();
+      return JSON.stringify(projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        state: p.state,
+        progress: Math.round(p.progress * 100),
+        issueCount: p.issueCount,
+        completedIssueCount: p.completedIssueCount,
+        startDate: p.startDate,
+        targetDate: p.targetDate,
+        url: p.url,
+      })));
+    },
+
+    get_project_detail: async (args) => {
+      const projectId = String(args.projectId || "");
+      const project = db.getProjectById(projectId);
+      if (!project) return JSON.stringify({ error: "Project not found" });
+      // Get all issues in this project
+      const allIssues = db.getAllIssues();
+      const projectIssues = allIssues.filter(i => i.snapshot.projectId === projectId);
+      return JSON.stringify({
+        ...project,
+        progress: Math.round(project.progress * 100),
+        issues: projectIssues.map(i => ({
+          issueId: i.snapshot.issueId,
+          identifier: i.snapshot.identifier,
+          title: i.snapshot.title,
+          status: i.snapshot.status,
+          boardColumn: i.snapshot.boardColumn,
+          assigneeName: i.snapshot.assigneeName,
+          priority: i.snapshot.priority,
+        })),
+      });
+    },
+
+    update_client_weight: async (args) => {
+      const clientId = Number(args.clientId);
+      const client = db.getClientById(clientId);
+      if (!client) return JSON.stringify({ error: "Client not found" });
+
+      const updates: { weight?: number; notes?: string; contractValue?: number } = {};
+      if (args.weight !== undefined && args.weight !== null) updates.weight = Number(args.weight);
+      if (args.notes !== undefined && args.notes !== null) updates.notes = String(args.notes);
+      if (args.contractValue !== undefined && args.contractValue !== null) updates.contractValue = Number(args.contractValue);
+
+      db.updateClientLocal(clientId, updates);
+      return JSON.stringify({ success: true, clientId, name: client.name, updates });
     },
 
     get_okrs: async () => {
