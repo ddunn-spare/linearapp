@@ -124,12 +124,26 @@ export class LinearSyncService {
     log.info("Synced cycles", { count: cycles.length, active: activeCycle?.name ?? "none" });
   }
 
+  /**
+   * Sync customers from Linear, filtered to only those with EAM-team issues.
+   * Customers without any issues linked to the configured team are skipped.
+   */
   async syncCustomers(): Promise<void> {
     if (!this.linear.hasKey) return;
     try {
       const customers = await this.linear.listCustomers();
+      const teamKey = this.cfg.linearTeamKey;
       const now = new Date().toISOString();
+      let synced = 0;
+      let skipped = 0;
+
       for (const c of customers) {
+        // Only sync customers that have issues related to our team
+        if (!c.teamKeys.includes(teamKey)) {
+          skipped++;
+          continue;
+        }
+
         this.db.upsertClient({
           linearCustomerId: c.id,
           name: c.name,
@@ -140,11 +154,13 @@ export class LinearSyncService {
           domainsJson: JSON.stringify(c.domains),
           logoUrl: c.logoUrl,
           ownerName: c.ownerName,
+          issueCount: c.issueCount,
           isActive: true,
           syncedAt: now,
         });
+        synced++;
       }
-      log.info("Synced customers", { count: customers.length });
+      log.info("Synced customers", { total: customers.length, synced, skipped, teamKey });
     } catch {
       log.debug("Customer sync skipped (feature may not be enabled)");
     }

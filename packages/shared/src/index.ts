@@ -468,6 +468,7 @@ export type Client = {
   notes?: string;
   logoUrl?: string;
   ownerName?: string;
+  issueCount: number;
   isActive: boolean;
   syncedAt?: string;
   createdAt: string;

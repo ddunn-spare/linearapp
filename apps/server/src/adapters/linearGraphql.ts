@@ -378,23 +378,29 @@ export class LinearGraphqlClient {
           revenue?: number; size?: number; logoUrl?: string;
           owner?: { id: string; name: string };
           createdAt: string; updatedAt: string;
+          issues: { nodes: Array<{ id: string; team: { key: string } }> };
         }> };
-      }>(`query{customers(first:100){nodes{id name domains tier{id name}status{id name}revenue size logoUrl owner{id name}createdAt updatedAt}}}`, {});
-      return data.customers.nodes.map(c => ({
-        id: c.id,
-        name: c.name,
-        domains: c.domains || [],
-        tierId: c.tier?.id,
-        tierName: c.tier?.name,
-        statusId: c.status?.id,
-        statusName: c.status?.name,
-        revenue: c.revenue,
-        size: c.size,
-        logoUrl: c.logoUrl,
-        ownerName: c.owner?.name,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-      }));
+      }>(`query{customers(first:100){nodes{id name domains tier{id name}status{id name}revenue size logoUrl owner{id name}createdAt updatedAt issues(first:50){nodes{id team{key}}}}}}`, {});
+      return data.customers.nodes.map(c => {
+        const teamKeys = new Set(c.issues?.nodes?.map(i => i.team.key) || []);
+        return {
+          id: c.id,
+          name: c.name,
+          domains: c.domains || [],
+          tierId: c.tier?.id,
+          tierName: c.tier?.name,
+          statusId: c.status?.id,
+          statusName: c.status?.name,
+          revenue: c.revenue,
+          size: c.size,
+          logoUrl: c.logoUrl,
+          ownerName: c.owner?.name,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          issueCount: c.issues?.nodes?.length || 0,
+          teamKeys: Array.from(teamKeys),
+        };
+      });
     } catch {
       return []; // Customers feature may not be enabled
     }
@@ -482,6 +488,7 @@ export type LinearCustomer = {
   tierId?: string; tierName?: string; statusId?: string; statusName?: string;
   revenue?: number; size?: number; logoUrl?: string; ownerName?: string;
   createdAt: string; updatedAt: string;
+  issueCount: number; teamKeys: string[];
 };
 
 export type LinearProject = {
