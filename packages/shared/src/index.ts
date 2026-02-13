@@ -314,6 +314,7 @@ export type ChatMessage = {
   content: string;
   toolCalls?: ChatToolCall[];
   actionProposals?: ActionProposal[];
+  matchedSkills?: SkillMatch[];
   createdAt: string;
 };
 
@@ -330,12 +331,34 @@ export type ChatStreamEvent =
   | { type: "tool_call_result"; toolCall: { id: string; name: string; result: string } }
   | { type: "action_proposed"; proposal: ActionProposal }
   | { type: "action_update"; proposalId: string; state: ActionState; result?: string; resultUrl?: string; error?: string }
+  | { type: "skills_matched"; skills: SkillMatch[] }
   | { type: "done"; messageId: string }
   | { type: "error"; error: string };
+
+// ─── Skills ───
+
+export type Skill = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  template: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SkillMatch = {
+  skillId: string;
+  skillName: string;
+};
 
 // ─── Action Proposals ───
 
 export type ActionState = "proposed" | "approved" | "declined" | "executing" | "succeeded" | "failed";
+
+export type ActionCategory = "linear" | "okr" | "internal";
 
 export type ActionPreviewField = {
   field: string;
@@ -352,6 +375,7 @@ export type ActionProposal = {
   description: string;
   preview: ActionPreviewField[];
   state: ActionState;
+  category?: ActionCategory;
   idempotencyKey: string;
   result?: string;
   resultUrl?: string;
