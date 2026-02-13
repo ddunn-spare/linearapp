@@ -12,7 +12,7 @@ This roadmap delivers approval-gated write actions for the existing AI chat assi
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Approval Infrastructure & Flow** - Action proposal, approval cards, execution lifecycle, and streaming foundation
+- [x] **Phase 1: Approval Infrastructure & Flow** - Action proposal, approval cards, execution lifecycle, and streaming foundation
 - [ ] **Phase 2: Linear & Internal Write Actions** - All Linear mutations and OKR management through the approval flow
 - [ ] **Phase 3: GitHub Write Actions** - Pull request, issue, and comment actions via GitHub REST API
 - [ ] **Phase 4: Discovery & Rendering** - Capability info button, contextual suggestions, and rich markdown in chat
@@ -32,9 +32,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Shared types, DB schema, action state machine, and SSE streaming refactor (Wave 1)
-- [ ] 01-02-PLAN.md -- Tool registry extensions, ApprovalManager service, action endpoints, and system prompt auto-generation (Wave 2)
-- [ ] 01-03-PLAN.md -- Approval card UI, ChatPage integration, and end-to-end approval flow (Wave 3)
+- [x] 01-01-PLAN.md -- Shared types, DB schema, action state machine, and SSE streaming refactor (Wave 1)
+- [x] 01-02-PLAN.md -- Tool registry extensions, ApprovalManager service, action endpoints, and system prompt auto-generation (Wave 2)
+- [x] 01-03-PLAN.md -- Approval card UI, ChatPage integration, and end-to-end approval flow (Wave 3)
 
 ### Phase 2: Linear & Internal Write Actions
 **Goal**: Agent can create, update, and manage Linear issues, projects, cycles, labels, and internal OKRs through the approval flow
@@ -90,7 +90,7 @@ Note: Phases 2 and 3 both depend on Phase 1 but not on each other. They are orde
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Approval Infrastructure & Flow | 0/3 | Planned | - |
+| 1. Approval Infrastructure & Flow | 3/3 | ✓ Complete | 2026-02-12 |
 | 2. Linear & Internal Write Actions | 0/3 | Not started | - |
 | 3. GitHub Write Actions | 0/1 | Not started | - |
 | 4. Discovery & Rendering | 0/2 | Not started | - |
