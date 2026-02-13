@@ -234,6 +234,14 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS issue_embeddings (
+  issue_id TEXT PRIMARY KEY,
+  embedding_blob BLOB NOT NULL,
+  text_hash TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const defaultWipLimits: WipLimit[] = [
@@ -1141,6 +1149,42 @@ export class StateDb {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  // ─── Embeddings ───
+
+  upsertEmbedding(issueId: string, embedding: number[], textHash: string, metadata: Record<string, unknown>): void {
+    const blob = Buffer.from(new Float32Array(embedding).buffer);
+    this.db.prepare(`
+      INSERT INTO issue_embeddings (issue_id, embedding_blob, text_hash, metadata_json, created_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(issue_id) DO UPDATE SET
+        embedding_blob=excluded.embedding_blob, text_hash=excluded.text_hash,
+        metadata_json=excluded.metadata_json, created_at=excluded.created_at
+    `).run(issueId, blob, textHash, JSON.stringify(metadata));
+  }
+
+  getEmbeddingHash(issueId: string): string | undefined {
+    const r = this.db.prepare(`SELECT text_hash FROM issue_embeddings WHERE issue_id = ?`).get(issueId) as any;
+    return r?.text_hash;
+  }
+
+  getAllEmbeddings(): Array<{ issueId: string; embedding: number[]; metadata: Record<string, unknown> }> {
+    const rows = this.db.prepare(`SELECT issue_id, embedding_blob, metadata_json FROM issue_embeddings`).all() as any[];
+    return rows.map(r => ({
+      issueId: r.issue_id,
+      embedding: Array.from(new Float32Array(r.embedding_blob.buffer, r.embedding_blob.byteOffset, r.embedding_blob.byteLength / 4)),
+      metadata: safeJson(r.metadata_json, {}),
+    }));
+  }
+
+  getEmbeddingCount(): number {
+    const r = this.db.prepare(`SELECT COUNT(*) as cnt FROM issue_embeddings`).get() as any;
+    return r?.cnt || 0;
+  }
+
+  deleteEmbedding(issueId: string): void {
+    this.db.prepare(`DELETE FROM issue_embeddings WHERE issue_id = ?`).run(issueId);
   }
 }
 

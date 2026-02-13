@@ -410,7 +410,7 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
       type: "function",
       function: {
         name: "find_similar_issues",
-        description: "Find issues similar to a given query or issue",
+        description: "Find issues semantically similar to a query using vector embeddings (falls back to text search if embeddings unavailable)",
         strict: true,
         parameters: {
           type: "object",
@@ -854,7 +854,7 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
   ];
 }
 
-export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>): Record<string, ToolHandler> {
+export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>, embeddingService?: { findSimilar(query: string, limit?: number): Promise<Array<{ issueId: string; identifier: string; title: string; similarity: number; assigneeName?: string; status?: string }>> }): Record<string, ToolHandler> {
   // Set up dynamic previews that need db access
   const deleteOkrMeta = toolMetadata.get("delete_okr");
   if (deleteOkrMeta) {
@@ -1184,12 +1184,32 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
 
     find_similar_issues: async (args) => {
       const query = String(args.query || "");
+
+      // Try vector similarity search first
+      if (embeddingService) {
+        try {
+          const vectorResults = await embeddingService.findSimilar(query, 5);
+          if (vectorResults.length > 0) {
+            return JSON.stringify(vectorResults.map(r => ({
+              identifier: r.identifier,
+              title: r.title,
+              status: r.status,
+              assigneeName: r.assigneeName,
+              similarity: r.similarity,
+              searchMethod: "vector",
+            })));
+          }
+        } catch { /* fall through to text search */ }
+      }
+
+      // Fallback to text search
       const results = db.searchIssues(query, 5);
       return JSON.stringify(results.map(i => ({
         identifier: i.snapshot.identifier,
         title: i.snapshot.title,
         status: i.snapshot.status,
         assigneeName: i.snapshot.assigneeName,
+        searchMethod: "text",
       })));
     },
 
