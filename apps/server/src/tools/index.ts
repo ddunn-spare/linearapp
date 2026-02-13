@@ -1022,10 +1022,17 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
     get_cycle_stats: async (args) => {
       const cycleId = args.cycleId ? String(args.cycleId) : null;
       const cycle = cycleId ? db.getCycleById(cycleId) : db.getActiveCycle();
-      if (!cycle) return JSON.stringify({ error: cycleId ? "Cycle not found" : "No active cycle" });
+      if (!cycle) return JSON.stringify({ error: cycleId ? "Cycle not found" : "No active cycle found — cycles may not be synced or the team may be between cycles" });
       const issues = db.getIssuesByCycle(cycle.id);
       const completed = issues.filter(i => i.snapshot.boardColumn === "done").length;
       const inProgress = issues.filter(i => i.snapshot.boardColumn === "in_progress" || i.snapshot.boardColumn === "in_review").length;
+
+      const now = new Date();
+      const start = new Date(cycle.startsAt);
+      const end = new Date(cycle.endsAt);
+      const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysRemaining = Math.max(0, totalDays - elapsedDays);
 
       // Per-member breakdown
       const memberMap = new Map<string, { name: string; assigned: number; completed: number; inProgress: number; todo: number }>();
@@ -1045,6 +1052,7 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
       return JSON.stringify({
         id: cycle.id,
         name: cycle.name,
+        number: cycle.number,
         progress: Math.round(cycle.progress * 100),
         totalIssues: issues.length,
         completed,
@@ -1052,6 +1060,12 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
         remaining: issues.length - completed,
         startsAt: cycle.startsAt,
         endsAt: cycle.endsAt,
+        totalDays,
+        elapsedDays,
+        daysRemaining,
+        isActive: cycle.isActive,
+        completedScopeCount: cycle.completedScopeCount,
+        totalScopeCount: cycle.totalScopeCount,
         memberBreakdown: Array.from(memberMap.entries()).map(([memberId, stats]) => ({
           memberId, ...stats,
         })),
@@ -1060,17 +1074,27 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
 
     list_cycles: async () => {
       const cycles = db.getAllCycles();
-      return JSON.stringify(cycles.map(c => ({
-        id: c.id,
-        name: c.name,
-        number: c.number,
-        startsAt: c.startsAt,
-        endsAt: c.endsAt,
-        progress: Math.round(c.progress * 100),
-        completedScopeCount: c.completedScopeCount,
-        totalScopeCount: c.totalScopeCount,
-        isActive: c.isActive,
-      })));
+      const now = new Date();
+      return JSON.stringify(cycles.map(c => {
+        const start = new Date(c.startsAt);
+        const end = new Date(c.endsAt);
+        const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const elapsedDays = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        const daysRemaining = Math.max(0, totalDays - elapsedDays);
+        return {
+          id: c.id,
+          name: c.name,
+          number: c.number,
+          startsAt: c.startsAt,
+          endsAt: c.endsAt,
+          progress: Math.round(c.progress * 100),
+          completedScopeCount: c.completedScopeCount,
+          totalScopeCount: c.totalScopeCount,
+          isActive: c.isActive,
+          totalDays,
+          daysRemaining,
+        };
+      }));
     },
 
     get_clients: async (args) => {
