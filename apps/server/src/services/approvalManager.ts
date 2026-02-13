@@ -2,7 +2,7 @@ import type { ActionProposal, ActionPreviewField } from "@linearapp/shared";
 import type { ActionStateMachine } from "./actionStateMachine";
 import type { ToolHandler } from "../tools/index";
 import type { StateDb } from "../db";
-import { generatePreviewForTool } from "../tools/index";
+import { generatePreviewForTool, getToolActionCategory } from "../tools/index";
 import { createLogger } from "../lib/logger";
 
 const log = createLogger("ApprovalManager");
@@ -26,6 +26,7 @@ export class ApprovalManager {
   }): ActionProposal {
     const preview = generatePreviewForTool(params.toolName, params.toolArguments);
     const description = this.buildDescription(params.toolName, params.toolArguments, preview);
+    const category = getToolActionCategory(params.toolName) || "internal";
 
     const proposal = this.stateMachine.createProposal({
       conversationId: params.conversationId,
@@ -34,6 +35,7 @@ export class ApprovalManager {
       toolArguments: params.toolArguments,
       description,
       preview,
+      category,
     });
 
     log.info("Created proposal", { id: proposal.id, toolName: params.toolName });

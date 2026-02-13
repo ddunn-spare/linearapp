@@ -257,6 +257,19 @@ export function getWriteToolSummaries(): { name: string; description: string }[]
   return results;
 }
 
+export function getWriteToolSummariesGrouped(): Map<string, { name: string; description: string }[]> {
+  const groups = new Map<string, { name: string; description: string }[]>();
+  for (const [name, meta] of toolMetadata) {
+    if (meta.requiresApproval) {
+      const category = meta.actionCategory || "internal";
+      const group = groups.get(category) || [];
+      group.push({ name, description: meta.descriptionForUser });
+      groups.set(category, group);
+    }
+  }
+  return groups;
+}
+
 export function getToolActionCategory(toolName: string): ActionCategory | undefined {
   return toolMetadata.get(toolName)?.actionCategory;
 }

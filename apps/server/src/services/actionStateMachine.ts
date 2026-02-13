@@ -1,4 +1,4 @@
-import type { ActionProposal, ActionPreviewField, ActionState } from "@linearapp/shared";
+import type { ActionProposal, ActionCategory, ActionPreviewField, ActionState } from "@linearapp/shared";
 import type { StateDb } from "../db";
 import { createLogger } from "../lib/logger";
 
@@ -24,6 +24,7 @@ export class ActionStateMachine {
     toolArguments: Record<string, unknown>;
     description: string;
     preview: ActionPreviewField[];
+    category?: ActionCategory;
   }): ActionProposal {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -38,6 +39,7 @@ export class ActionStateMachine {
       description: params.description,
       preview: params.preview,
       state: "proposed",
+      category: params.category,
       idempotencyKey,
       createdAt: now,
       updatedAt: now,

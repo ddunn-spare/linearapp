@@ -6,13 +6,25 @@ import type { AppConfig } from "../config";
 import type { OpenAIClient } from "../adapters/openaiClient";
 import type { ApprovalManager } from "./approvalManager";
 import type { SkillService } from "./skillService";
-import { getToolDefinitions, createToolHandlers, isWriteTool, getWriteToolSummaries, type ToolHandler } from "../tools/index";
+import { getToolDefinitions, createToolHandlers, isWriteTool, getWriteToolSummariesGrouped, type ToolHandler } from "../tools/index";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  linear: "Linear Actions",
+  okr: "OKR Actions",
+  internal: "Internal Actions",
+};
 
 function buildSystemPrompt(skillTemplates?: string[]): string {
-  const writeTools = getWriteToolSummaries();
-  const writeSection = writeTools.length > 0
-    ? `\n\nYou can also take actions on behalf of the user (these require user approval before execution):\n${writeTools.map(t => `- ${t.description}`).join("\n")}\n\nWhen you want to take an action, use the appropriate tool. The user will see a preview of what will change and can approve or decline. If they decline, acknowledge naturally and move on — do not ask follow-up questions about the declined action. If they approve, the action will execute and you'll see the result.`
-    : "";
+  const grouped = getWriteToolSummariesGrouped();
+  let writeSection = "";
+  if (grouped.size > 0) {
+    const sections: string[] = [];
+    for (const [category, tools] of grouped) {
+      const label = CATEGORY_LABELS[category] || `${category} Actions`;
+      sections.push(`${label} (require approval):\n${tools.map(t => `- ${t.description}`).join("\n")}`);
+    }
+    writeSection = `\n\nYou can also take actions on behalf of the user:\n\n${sections.join("\n\n")}\n\nWhen you want to take an action, use the appropriate tool. The user will see a preview of what will change and can approve or decline. If they decline, acknowledge naturally and move on — do not ask follow-up questions about the declined action. If they approve, the action will execute and you'll see the result.\n\nWhen you retrieve issue details or search results, look for opportunities to suggest linking issues to key results. If an issue's title, description, or labels align with a key result's description, proactively suggest using link_issue_to_kr. Similarly, when issues linked to a key result are completed, suggest using update_key_result to update the progress.`;
+  }
 
   const skillsSection = skillTemplates?.length
     ? `\n\n--- Active Skills ---\n${skillTemplates.join("\n\n")}`

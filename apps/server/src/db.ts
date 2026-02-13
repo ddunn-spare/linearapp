@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type {
+  ActionCategory,
   ActionProposal,
   ActionState,
   BoardColumnId,
@@ -15,6 +16,8 @@ import type {
   PrReview,
   PullRequest,
   RiceScore,
+  Skill,
+  SkillMatch,
   SyncStatus,
   TeamMember,
   WipLimit,
@@ -182,6 +185,18 @@ CREATE TABLE IF NOT EXISTS action_proposals (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  template TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 const defaultWipLimits: WipLimit[] = [
@@ -219,6 +234,12 @@ export class StateDb {
         .prepare(`INSERT OR IGNORE INTO wip_limits (column_id, wip_limit) VALUES (?, ?)`)
         .run(wl.columnId, wl.limit);
     }
+
+    // Migration: add matched_skills_json column to chat_messages
+    try { this.db.exec(`ALTER TABLE chat_messages ADD COLUMN matched_skills_json TEXT`); } catch { /* column already exists */ }
+
+    // Migration: add category column to action_proposals
+    try { this.db.exec(`ALTER TABLE action_proposals ADD COLUMN category TEXT NOT NULL DEFAULT 'internal'`); } catch { /* column already exists */ }
   }
 
   close() {
@@ -718,8 +739,8 @@ export class StateDb {
   }
 
   addMessage(msg: ChatMessage) {
-    this.db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, tool_calls_json, created_at) VALUES (?,?,?,?,?,?)`)
-      .run(msg.id, msg.conversationId, msg.role, msg.content, msg.toolCalls ? JSON.stringify(msg.toolCalls) : null, msg.createdAt);
+    this.db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, tool_calls_json, matched_skills_json, created_at) VALUES (?,?,?,?,?,?,?)`)
+      .run(msg.id, msg.conversationId, msg.role, msg.content, msg.toolCalls ? JSON.stringify(msg.toolCalls) : null, msg.matchedSkills ? JSON.stringify(msg.matchedSkills) : null, msg.createdAt);
     this.db.prepare(`UPDATE chat_conversations SET updated_at = ? WHERE id = ?`)
       .run(msg.createdAt, msg.conversationId);
   }
@@ -728,6 +749,7 @@ export class StateDb {
     return (this.db.prepare(`SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY created_at`).all(conversationId) as any[]).map(r => ({
       id: r.id, conversationId: r.conversation_id, role: r.role, content: r.content,
       toolCalls: r.tool_calls_json ? safeJson(r.tool_calls_json, undefined) : undefined,
+      matchedSkills: r.matched_skills_json ? safeJson<SkillMatch[] | undefined>(r.matched_skills_json, undefined) : undefined,
       createdAt: r.created_at,
     }));
   }
@@ -740,8 +762,8 @@ export class StateDb {
 
   createActionProposal(proposal: ActionProposal): void {
     this.db.prepare(`
-      INSERT INTO action_proposals (id, conversation_id, message_id, tool_name, tool_arguments_json, description, preview_json, state, idempotency_key, result, result_url, error, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO action_proposals (id, conversation_id, message_id, tool_name, tool_arguments_json, description, preview_json, state, category, idempotency_key, result, result_url, error, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       proposal.id,
       proposal.conversationId,
@@ -751,6 +773,7 @@ export class StateDb {
       proposal.description,
       JSON.stringify(proposal.preview),
       proposal.state,
+      proposal.category ?? "internal",
       proposal.idempotencyKey,
       proposal.result ?? null,
       proposal.resultUrl ?? null,
@@ -803,10 +826,74 @@ export class StateDb {
       description: r.description,
       preview: safeJson(r.preview_json, []),
       state: r.state as ActionState,
+      category: (r.category as ActionCategory) ?? undefined,
       idempotencyKey: r.idempotency_key,
       result: r.result ?? undefined,
       resultUrl: r.result_url ?? undefined,
       error: r.error ?? undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  // ─── Skills ───
+
+  createSkill(skill: Skill): void {
+    this.db.prepare(`
+      INSERT INTO skills (id, name, description, category, tags_json, template, enabled, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(skill.id, skill.name, skill.description, skill.category, JSON.stringify(skill.tags), skill.template, skill.enabled ? 1 : 0, skill.createdAt, skill.updatedAt);
+  }
+
+  updateSkill(id: string, updates: Partial<Omit<Skill, "id" | "createdAt">>): void {
+    const existing = this.getSkillById(id);
+    if (!existing) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE skills SET name=?, description=?, category=?, tags_json=?, template=?, enabled=?, updated_at=? WHERE id=?
+    `).run(
+      updates.name ?? existing.name,
+      updates.description ?? existing.description,
+      updates.category ?? existing.category,
+      updates.tags ? JSON.stringify(updates.tags) : JSON.stringify(existing.tags),
+      updates.template ?? existing.template,
+      updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : (existing.enabled ? 1 : 0),
+      updates.updatedAt ?? now,
+      id,
+    );
+  }
+
+  deleteSkill(id: string): void {
+    this.db.prepare(`DELETE FROM skills WHERE id = ?`).run(id);
+  }
+
+  getSkillById(id: string): Skill | undefined {
+    const r = this.db.prepare(`SELECT * FROM skills WHERE id = ?`).get(id) as any;
+    return r ? this.toSkill(r) : undefined;
+  }
+
+  getSkillByName(name: string): Skill | undefined {
+    const r = this.db.prepare(`SELECT * FROM skills WHERE name = ?`).get(name) as any;
+    return r ? this.toSkill(r) : undefined;
+  }
+
+  getAllSkills(): Skill[] {
+    return (this.db.prepare(`SELECT * FROM skills ORDER BY name`).all() as any[]).map(r => this.toSkill(r));
+  }
+
+  getEnabledSkills(): Skill[] {
+    return (this.db.prepare(`SELECT * FROM skills WHERE enabled = 1 ORDER BY name`).all() as any[]).map(r => this.toSkill(r));
+  }
+
+  private toSkill(r: any): Skill {
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      category: r.category,
+      tags: safeJson<string[]>(r.tags_json, []),
+      template: r.template,
+      enabled: Boolean(r.enabled),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
