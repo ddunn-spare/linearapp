@@ -249,4 +249,120 @@ export class LinearGraphqlClient {
     if (!data.commentCreate.success) throw new Error("Linear commentCreate failed");
     return { id: data.commentCreate.comment.id, url: data.commentCreate.comment.url };
   }
+
+  // ─── Project Mutations ───
+
+  async createProject(params: {
+    teamIds: string[];
+    name: string;
+    description?: string;
+    state?: string;
+  }): Promise<{ id: string; name: string; url: string }> {
+    const input: Record<string, unknown> = {
+      teamIds: params.teamIds,
+      name: params.name,
+    };
+    if (params.description !== undefined) input.description = params.description;
+    if (params.state !== undefined) input.state = params.state;
+
+    const data = await this.query<{
+      projectCreate: { success: boolean; project: { id: string; name: string; url: string } };
+    }>(
+      `mutation($input:ProjectCreateInput!){projectCreate(input:$input){success project{id name url}}}`,
+      { input }
+    );
+
+    if (!data.projectCreate.success) throw new Error("Linear projectCreate failed");
+    return data.projectCreate.project;
+  }
+
+  async updateProject(
+    projectId: string,
+    input: { name?: string; description?: string; state?: string },
+  ): Promise<{ success: boolean }> {
+    const cleanInput: Record<string, unknown> = {};
+    if (input.name !== undefined) cleanInput.name = input.name;
+    if (input.description !== undefined) cleanInput.description = input.description;
+    if (input.state !== undefined) cleanInput.state = input.state;
+
+    const data = await this.query<{
+      projectUpdate: { success: boolean };
+    }>(
+      `mutation($id:String!,$input:ProjectUpdateInput!){projectUpdate(id:$id,input:$input){success}}`,
+      { id: projectId, input: cleanInput }
+    );
+
+    return { success: data.projectUpdate.success };
+  }
+
+  // ─── Cycle Issue Mutations ───
+
+  async addIssueToCycle(issueId: string, cycleId: string): Promise<{ success: boolean }> {
+    return this.updateIssue(issueId, { cycleId });
+  }
+
+  async removeIssueFromCycle(issueId: string): Promise<{ success: boolean }> {
+    // Linear API: setting cycleId to null removes the issue from its cycle
+    const data = await this.query<{
+      issueUpdate: { success: boolean };
+    }>(
+      `mutation($id:String!,$input:IssueUpdateInput!){issueUpdate(id:$id,input:$input){success}}`,
+      { id: issueId, input: { cycleId: null } }
+    );
+    return { success: data.issueUpdate.success };
+  }
+
+  // ─── Label Mutations ───
+
+  async createLabel(
+    teamId: string,
+    name: string,
+    color?: string,
+  ): Promise<{ id: string; name: string }> {
+    const input: Record<string, unknown> = { teamId, name };
+    if (color !== undefined) input.color = color;
+
+    const data = await this.query<{
+      issueLabelCreate: { success: boolean; issueLabel: { id: string; name: string } };
+    }>(
+      `mutation($input:IssueLabelCreateInput!){issueLabelCreate(input:$input){success issueLabel{id name}}}`,
+      { input }
+    );
+
+    if (!data.issueLabelCreate.success) throw new Error("Linear issueLabelCreate failed");
+    return data.issueLabelCreate.issueLabel;
+  }
+
+  // ─── Cycle Queries (extended) ───
+
+  async listCyclesForTeam(teamKey: string): Promise<Array<{ id: string; name: string; number: number; startsAt: string; endsAt: string }>> {
+    try {
+      const data = await this.query<{
+        teams: { nodes: Array<{ cycles: { nodes: Array<{
+          id: string; name?: string; number: number; startsAt: string; endsAt: string;
+        }> } }> };
+      }>(`query($teamKey:String!){teams(filter:{key:{eq:$teamKey}},first:1){nodes{cycles(first:50,orderBy:createdAt){nodes{id name number startsAt endsAt}}}}}`, { teamKey });
+      return unwrapConnection(data.teams.nodes[0]?.cycles).map(c => ({
+        id: c.id,
+        name: c.name || `Cycle ${c.number}`,
+        number: c.number,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  // ─── Label Queries (for issue label management) ───
+
+  async getIssueLabels(issueId: string): Promise<Array<{ id: string; name: string }>> {
+    const data = await this.query<{
+      issue: { labels: { nodes: Array<{ id: string; name: string }> } };
+    }>(
+      `query($id:String!){issue(id:$id){labels{nodes{id name}}}}`,
+      { id: issueId }
+    );
+    return data.issue?.labels?.nodes || [];
+  }
 }

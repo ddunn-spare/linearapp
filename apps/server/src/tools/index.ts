@@ -94,6 +94,119 @@ const toolMetadata = new Map<string, ToolMetadata>([
       ];
     },
   }],
+  ["manage_project", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Create, update, or archive a Linear project",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Action", newValue: String(args.action || "create") });
+      fields.push({ field: "Project", newValue: String(args.projectName || "") });
+      if (args.description) fields.push({ field: "Description", newValue: String(args.description).slice(0, 100) + (String(args.description).length > 100 ? "..." : "") });
+      if (args.newName) fields.push({ field: "New Name", newValue: String(args.newName) });
+      return fields;
+    },
+  }],
+  ["manage_cycle", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Add or remove issues from a cycle",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Action", newValue: String(args.action || "add_issue") });
+      fields.push({ field: "Issue", newValue: String(args.issueId || "") });
+      if (args.cycleName) fields.push({ field: "Cycle", newValue: String(args.cycleName) });
+      else fields.push({ field: "Cycle", newValue: "(active cycle)" });
+      return fields;
+    },
+  }],
+  ["manage_labels", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "linear",
+    descriptionForUser: "Create labels or add/remove labels from issues",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Action", newValue: String(args.action || "create") });
+      fields.push({ field: "Label", newValue: String(args.labelName || "") });
+      if (args.issueId) fields.push({ field: "Issue", newValue: String(args.issueId) });
+      if (args.color) fields.push({ field: "Color", newValue: String(args.color) });
+      return fields;
+    },
+  }],
+  ["create_okr", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "okr",
+    descriptionForUser: "Create a new OKR with key results",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "Objective", newValue: String(args.objective || "") });
+      fields.push({ field: "Quarter", newValue: String(args.quarter || "") });
+      fields.push({ field: "Owner", newValue: String(args.owner || "") });
+      if (args.keyResults && Array.isArray(args.keyResults)) {
+        for (const kr of args.keyResults) {
+          const krObj = kr as Record<string, unknown>;
+          fields.push({ field: "Key Result", newValue: `${String(krObj.description || "")} (target: ${krObj.targetValue} ${krObj.unit || ""})` });
+        }
+      }
+      return fields;
+    },
+  }],
+  ["update_okr", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "okr",
+    descriptionForUser: "Update an existing OKR or its key results",
+    generatePreview: (args: Record<string, unknown>) => {
+      const fields: ActionPreviewField[] = [];
+      fields.push({ field: "OKR ID", newValue: String(args.okrId || "") });
+      if (args.objective !== undefined && args.objective !== null) fields.push({ field: "Objective", oldValue: "(current)", newValue: String(args.objective) });
+      if (args.quarter !== undefined && args.quarter !== null) fields.push({ field: "Quarter", oldValue: "(current)", newValue: String(args.quarter) });
+      if (args.owner !== undefined && args.owner !== null) fields.push({ field: "Owner", oldValue: "(current)", newValue: String(args.owner) });
+      if (args.status !== undefined && args.status !== null) fields.push({ field: "Status", oldValue: "(current)", newValue: String(args.status) });
+      if (args.keyResults && Array.isArray(args.keyResults)) {
+        fields.push({ field: "Key Results", newValue: `${args.keyResults.length} key results updated` });
+      }
+      return fields;
+    },
+  }],
+  ["delete_okr", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "okr",
+    destructive: true,
+    descriptionForUser: "Delete an OKR and all its key results",
+    // generatePreview is defined dynamically in createToolHandlers since it needs db access
+  }],
+  ["update_key_result", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "okr",
+    descriptionForUser: "Update a key result's current progress value. When issues linked to a KR are completed, proactively suggest updating the KR progress based on the completion data.",
+    generatePreview: (args: Record<string, unknown>) => {
+      return [
+        { field: "Key Result ID", newValue: String(args.keyResultId || "") },
+        { field: "Current Value", newValue: String(args.currentValue ?? "") },
+      ];
+    },
+  }],
+  ["link_issue_to_kr", {
+    requiresApproval: true,
+    category: "action",
+    actionCategory: "okr",
+    descriptionForUser: "Link an issue to a key result for OKR tracking. Proactively suggest this when you notice an issue's work aligns with a key result based on title, description, or labels.",
+    generatePreview: (args: Record<string, unknown>) => {
+      const action = String(args.action || "link");
+      return [
+        { field: "Issue", newValue: String(args.issueId || "") },
+        { field: "Key Result", newValue: String(args.keyResultId || "") },
+        { field: "Action", newValue: action },
+      ];
+    },
+  }],
 ]);
 
 export function getToolMetadata(toolName: string): ToolMetadata | undefined {
@@ -386,10 +499,244 @@ export function getToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "manage_project",
+        description: "Create, update, or archive a Linear project",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["create", "update", "archive"], description: "Action to perform on the project" },
+            projectName: { type: "string", description: "Project name (for create/update/archive)" },
+            description: { type: ["string", "null"], description: "Project description (for create/update)" },
+            newName: { type: ["string", "null"], description: "New name for the project (for update/rename)" },
+          },
+          required: ["action", "projectName", "description", "newName"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "manage_cycle",
+        description: "Add or remove issues from a Linear cycle",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["add_issue", "remove_issue"], description: "Action to perform" },
+            issueId: { type: "string", description: "Issue ID or identifier (e.g. ENG-123)" },
+            cycleName: { type: ["string", "null"], description: "Cycle name to target (null = active cycle)" },
+          },
+          required: ["action", "issueId", "cycleName"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "manage_labels",
+        description: "Create labels or add/remove labels from issues",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["create", "add_to_issue", "remove_from_issue"], description: "Action to perform" },
+            labelName: { type: "string", description: "Label name" },
+            issueId: { type: ["string", "null"], description: "Issue ID or identifier (required for add/remove)" },
+            color: { type: ["string", "null"], description: "Hex color for new label (e.g. #FF0000)" },
+          },
+          required: ["action", "labelName", "issueId", "color"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "create_okr",
+        description: "Create a new OKR with objective, quarter, owner, and key results",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            objective: { type: "string", description: "The OKR objective statement" },
+            quarter: { type: "string", description: "Quarter (e.g. Q1 2026)" },
+            owner: { type: "string", description: "Name of the OKR owner" },
+            keyResults: {
+              type: "array",
+              description: "Key results for this OKR",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string", description: "Key result description" },
+                  targetValue: { type: "number", description: "Target value to achieve" },
+                  unit: { type: "string", description: "Unit of measurement (e.g. %, count, days)" },
+                },
+                required: ["description", "targetValue", "unit"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["objective", "quarter", "owner", "keyResults"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "update_okr",
+        description: "Update an existing OKR's fields or its key results",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            okrId: { type: "string", description: "OKR ID to update" },
+            objective: { type: ["string", "null"], description: "New objective text" },
+            quarter: { type: ["string", "null"], description: "New quarter" },
+            owner: { type: ["string", "null"], description: "New owner name" },
+            status: { type: ["string", "null"], description: "New status (e.g. active, completed)" },
+            keyResults: {
+              type: ["array", "null"],
+              description: "Updated key results (replaces existing)",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: ["string", "null"], description: "Existing key result ID (null for new)" },
+                  description: { type: "string", description: "Key result description" },
+                  targetValue: { type: "number", description: "Target value" },
+                  currentValue: { type: "number", description: "Current value" },
+                  unit: { type: "string", description: "Unit of measurement" },
+                },
+                required: ["id", "description", "targetValue", "currentValue", "unit"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["okrId", "objective", "quarter", "owner", "status", "keyResults"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "delete_okr",
+        description: "Permanently delete an OKR and all its key results. This action cannot be undone.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            okrId: { type: "string", description: "OKR ID to delete" },
+          },
+          required: ["okrId"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "update_key_result",
+        description: "Update a key result's current progress value. When issues linked to a KR are completed, proactively suggest updating the KR progress based on the completion data.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            keyResultId: { type: "string", description: "Key result ID to update" },
+            currentValue: { type: "number", description: "New current value for the key result" },
+          },
+          required: ["keyResultId", "currentValue"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "link_issue_to_kr",
+        description: "Link an issue to a key result for OKR tracking. Proactively suggest this when you notice an issue's work aligns with a key result based on title, description, or labels.",
+        strict: true,
+        parameters: {
+          type: "object",
+          properties: {
+            issueId: { type: "string", description: "Issue ID or identifier (e.g. ENG-123)" },
+            keyResultId: { type: "string", description: "Key result ID to link/unlink" },
+            action: { type: "string", enum: ["link", "unlink"], description: "Whether to link or unlink the issue" },
+          },
+          required: ["issueId", "keyResultId", "action"],
+          additionalProperties: false,
+        },
+      },
+    },
   ];
 }
 
 export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg: AppConfig, trackedLinearIds?: Set<string>): Record<string, ToolHandler> {
+  // Set up dynamic previews that need db access
+  const deleteOkrMeta = toolMetadata.get("delete_okr");
+  if (deleteOkrMeta) {
+    deleteOkrMeta.generatePreview = (args: Record<string, unknown>) => {
+      const okrId = String(args.okrId || "");
+      const okr = db.getOkrById(okrId);
+      if (okr) {
+        return [
+          { field: "Objective", newValue: okr.objective },
+          { field: "Quarter", newValue: okr.quarter },
+        ];
+      }
+      return [{ field: "OKR ID", newValue: okrId }];
+    };
+  }
+
+  const updateKrMeta = toolMetadata.get("update_key_result");
+  if (updateKrMeta) {
+    updateKrMeta.generatePreview = (args: Record<string, unknown>) => {
+      const keyResultId = String(args.keyResultId || "");
+      const currentValue = args.currentValue;
+      const okrs = db.getOkrs();
+      for (const okr of okrs) {
+        const kr = okr.keyResults.find(k => k.id === keyResultId);
+        if (kr) {
+          return [
+            { field: "Key Result", newValue: kr.description },
+            { field: "Current Value", oldValue: String(kr.currentValue), newValue: String(currentValue ?? "") },
+            { field: "Target", newValue: `${kr.targetValue} ${kr.unit}` },
+          ];
+        }
+      }
+      return [
+        { field: "Key Result ID", newValue: keyResultId },
+        { field: "Current Value", newValue: String(currentValue ?? "") },
+      ];
+    };
+  }
+
+  const linkIssueMeta = toolMetadata.get("link_issue_to_kr");
+  if (linkIssueMeta) {
+    linkIssueMeta.generatePreview = (args: Record<string, unknown>) => {
+      const issueId = String(args.issueId || "");
+      const keyResultId = String(args.keyResultId || "");
+      const action = String(args.action || "link");
+      const okrs = db.getOkrs();
+      let krDesc = keyResultId;
+      for (const okr of okrs) {
+        const kr = okr.keyResults.find(k => k.id === keyResultId);
+        if (kr) { krDesc = kr.description; break; }
+      }
+      return [
+        { field: "Issue", newValue: issueId },
+        { field: "Key Result", newValue: krDesc },
+        { field: "Action", newValue: action },
+      ];
+    };
+  }
+
   const filterMembers = (members: ReturnType<StateDb["getMembers"]>) =>
     trackedLinearIds && trackedLinearIds.size > 0
       ? members.filter(m => m.linearUserId && trackedLinearIds.has(m.linearUserId))
@@ -744,6 +1091,314 @@ export function createToolHandlers(db: StateDb, linear: LinearGraphqlClient, cfg
         commentId: result.id,
         issueIdentifier: rawId,
         url: result.url,
+      });
+    },
+
+    manage_project: async (args) => {
+      const action = String(args.action || "create");
+      const projectName = String(args.projectName || "");
+
+      if (action === "create") {
+        const teamId = await linear.getTeamId(cfg.linearTeamKey);
+        const description = args.description ? String(args.description) : undefined;
+        const project = await linear.createProject({
+          teamIds: [teamId],
+          name: projectName,
+          description,
+        });
+        return JSON.stringify({
+          success: true,
+          projectId: project.id,
+          name: project.name,
+          url: project.url,
+        });
+      }
+
+      // For update/archive: look up project by name
+      const projects = await linear.listProjects(cfg.linearTeamKey);
+      const lower = projectName.toLowerCase();
+      const match = projects.find(p => p.name.toLowerCase() === lower)
+        || projects.find(p => p.name.toLowerCase().includes(lower));
+      if (!match) {
+        return JSON.stringify({ error: `Project not found: ${projectName}` });
+      }
+
+      if (action === "archive") {
+        const result = await linear.updateProject(match.id, { state: "canceled" });
+        return JSON.stringify({ success: result.success, name: projectName });
+      }
+
+      // update
+      const updateInput: { name?: string; description?: string } = {};
+      if (args.newName) updateInput.name = String(args.newName);
+      if (args.description !== undefined && args.description !== null) updateInput.description = String(args.description);
+      const result = await linear.updateProject(match.id, updateInput);
+      return JSON.stringify({ success: result.success, name: args.newName ? String(args.newName) : projectName });
+    },
+
+    manage_cycle: async (args) => {
+      const action = String(args.action || "add_issue");
+      const rawIssueId = String(args.issueId || "");
+      const issueId = resolveIssueId(rawIssueId);
+
+      if (action === "remove_issue") {
+        const result = await linear.removeIssueFromCycle(issueId);
+        return JSON.stringify({ success: result.success, issueIdentifier: rawIssueId, cycleName: null });
+      }
+
+      // add_issue: resolve cycle
+      let cycleId: string | undefined;
+      let cycleName: string = "(active cycle)";
+
+      if (args.cycleName) {
+        // Resolve cycle name to ID
+        const cycles = await linear.listCyclesForTeam(cfg.linearTeamKey);
+        const lower = String(args.cycleName).toLowerCase();
+        const match = cycles.find(c => c.name.toLowerCase() === lower)
+          || cycles.find(c => c.name.toLowerCase().includes(lower));
+        if (match) {
+          cycleId = match.id;
+          cycleName = match.name;
+        } else {
+          return JSON.stringify({ error: `Cycle not found: ${args.cycleName}` });
+        }
+      } else {
+        // Use active cycle from db
+        const activeCycle = db.getActiveCycle();
+        if (activeCycle) {
+          cycleId = activeCycle.id;
+          cycleName = activeCycle.name;
+        } else {
+          return JSON.stringify({ error: "No active cycle found" });
+        }
+      }
+
+      const result = await linear.addIssueToCycle(issueId, cycleId!);
+      return JSON.stringify({ success: result.success, issueIdentifier: rawIssueId, cycleName });
+    },
+
+    manage_labels: async (args) => {
+      const action = String(args.action || "create");
+      const labelName = String(args.labelName || "");
+
+      if (action === "create") {
+        const teamId = await linear.getTeamId(cfg.linearTeamKey);
+        const color = args.color ? String(args.color) : undefined;
+        const label = await linear.createLabel(teamId, labelName, color);
+        return JSON.stringify({ success: true, labelId: label.id, labelName: label.name });
+      }
+
+      // add_to_issue / remove_from_issue
+      const rawIssueId = String(args.issueId || "");
+      if (!rawIssueId) {
+        return JSON.stringify({ error: "issueId is required for add/remove label operations" });
+      }
+      const issueId = resolveIssueId(rawIssueId);
+
+      // Get current labels on the issue
+      const currentLabels = await linear.getIssueLabels(issueId);
+      const currentLabelIds = currentLabels.map(l => l.id);
+
+      if (action === "add_to_issue") {
+        // Find the label by name
+        const resolved = await linear.listLabelsByName([labelName]);
+        const foundLabel = resolved[0];
+        if (!foundLabel) {
+          return JSON.stringify({ error: `Label not found: ${labelName}` });
+        }
+        const targetLabelId = foundLabel.id;
+        // Add if not already present
+        const newLabelIds = currentLabelIds.includes(targetLabelId)
+          ? currentLabelIds
+          : [...currentLabelIds, targetLabelId];
+        const result = await linear.updateIssue(issueId, { labelIds: newLabelIds });
+        return JSON.stringify({ success: result.success, labelName, issueIdentifier: rawIssueId });
+      }
+
+      // remove_from_issue
+      const resolved = await linear.listLabelsByName([labelName]);
+      const foundLabel = resolved[0];
+      if (!foundLabel) {
+        return JSON.stringify({ error: `Label not found: ${labelName}` });
+      }
+      const targetLabelId = foundLabel.id;
+      const newLabelIds = currentLabelIds.filter(id => id !== targetLabelId);
+      const result = await linear.updateIssue(issueId, { labelIds: newLabelIds });
+      return JSON.stringify({ success: result.success, labelName, issueIdentifier: rawIssueId });
+    },
+
+    create_okr: async (args) => {
+      const objective = String(args.objective || "");
+      const quarter = String(args.quarter || "");
+      const owner = String(args.owner || "");
+      const rawKRs = args.keyResults as Array<{ description: string; targetValue: number; unit: string }>;
+
+      if (!rawKRs || rawKRs.length === 0) {
+        return JSON.stringify({ error: "At least one key result is required" });
+      }
+
+      const now = new Date().toISOString();
+      const okrId = crypto.randomUUID();
+
+      const keyResults = rawKRs.map((kr, i) => ({
+        id: `${okrId}-kr-${i}`,
+        okrId,
+        description: kr.description,
+        targetValue: kr.targetValue,
+        currentValue: 0,
+        unit: kr.unit,
+        progress: 0,
+      }));
+
+      const okrDoc = {
+        okrId,
+        quarter,
+        owner,
+        status: "active",
+        objective,
+        keyResults,
+        progress: 0,
+        issueCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      db.upsertOkr(okrDoc);
+      return JSON.stringify({ success: true, okrId, objective });
+    },
+
+    update_okr: async (args) => {
+      const okrId = String(args.okrId || "");
+      const existing = db.getOkrById(okrId);
+      if (!existing) {
+        return JSON.stringify({ error: "OKR not found" });
+      }
+
+      const now = new Date().toISOString();
+
+      // Merge fields
+      const objective = (args.objective !== undefined && args.objective !== null) ? String(args.objective) : existing.objective;
+      const quarter = (args.quarter !== undefined && args.quarter !== null) ? String(args.quarter) : existing.quarter;
+      const owner = (args.owner !== undefined && args.owner !== null) ? String(args.owner) : existing.owner;
+      const status = (args.status !== undefined && args.status !== null) ? String(args.status) : existing.status;
+
+      // Merge key results
+      let keyResults = existing.keyResults;
+      if (args.keyResults && Array.isArray(args.keyResults)) {
+        const rawKRs = args.keyResults as Array<{ id: string | null; description: string; targetValue: number; currentValue: number; unit: string }>;
+        keyResults = rawKRs.map((kr, i) => {
+          const progress = kr.targetValue > 0 ? (kr.currentValue / kr.targetValue) * 100 : 0;
+          return {
+            id: kr.id || `${okrId}-kr-${i}`,
+            okrId,
+            description: kr.description,
+            targetValue: kr.targetValue,
+            currentValue: kr.currentValue,
+            unit: kr.unit,
+            progress,
+          };
+        });
+      }
+
+      const avgProgress = keyResults.length > 0
+        ? keyResults.reduce((s, k) => s + k.progress, 0) / keyResults.length
+        : 0;
+
+      const updated = {
+        ...existing,
+        objective,
+        quarter,
+        owner,
+        status,
+        keyResults,
+        progress: avgProgress,
+        updatedAt: now,
+      };
+
+      db.upsertOkr(updated);
+      return JSON.stringify({ success: true, okrId, objective });
+    },
+
+    delete_okr: async (args) => {
+      const okrId = String(args.okrId || "");
+      const existing = db.getOkrById(okrId);
+      if (!existing) {
+        return JSON.stringify({ error: "OKR not found" });
+      }
+
+      db.deleteOkr(okrId);
+      return JSON.stringify({ success: true, okrId, objective: existing.objective });
+    },
+
+    update_key_result: async (args) => {
+      const keyResultId = String(args.keyResultId || "");
+      const currentValue = Number(args.currentValue);
+
+      db.updateKeyResultProgress(keyResultId, currentValue);
+      return JSON.stringify({ success: true, keyResultId, currentValue });
+    },
+
+    link_issue_to_kr: async (args) => {
+      const rawIssueId = String(args.issueId || "");
+      const issueId = resolveIssueId(rawIssueId);
+      const keyResultId = String(args.keyResultId || "");
+      const action = String(args.action || "link");
+
+      // Look up the key result to find its parent OKR
+      const okrs = db.getOkrs();
+      let parentOkrId: string | undefined;
+      for (const okr of okrs) {
+        if (okr.keyResults.some(kr => kr.id === keyResultId)) {
+          parentOkrId = okr.okrId;
+          break;
+        }
+      }
+      if (!parentOkrId && action === "link") {
+        return JSON.stringify({ error: "Key result not found" });
+      }
+
+      // Get or create enrichment for this issue
+      const existingEnrichment = db.getEnrichment(issueId);
+      if (action === "link") {
+        const okr = db.getOkrById(parentOkrId!);
+        const enrichment = existingEnrichment || {
+          issueId,
+          similarIssueIds: [],
+          reasoning: "",
+          generatedAt: new Date().toISOString(),
+          provider: "heuristic" as const,
+        };
+        enrichment.okrId = parentOkrId;
+        enrichment.okrObjective = okr?.objective;
+        enrichment.generatedAt = new Date().toISOString();
+        db.saveEnrichment(enrichment);
+      } else {
+        // Unlink
+        if (existingEnrichment) {
+          existingEnrichment.okrId = undefined;
+          existingEnrichment.okrObjective = undefined;
+          existingEnrichment.generatedAt = new Date().toISOString();
+          db.saveEnrichment(existingEnrichment);
+        }
+      }
+
+      // Recalculate OKR issue count
+      if (parentOkrId) {
+        const allIssues = db.getAllIssues();
+        const linkedCount = allIssues.filter(i => i.enrichment?.okrId === parentOkrId).length;
+        const okrDoc = db.getOkrById(parentOkrId);
+        if (okrDoc) {
+          okrDoc.issueCount = linkedCount;
+          okrDoc.updatedAt = new Date().toISOString();
+          db.upsertOkr(okrDoc);
+        }
+      }
+
+      return JSON.stringify({
+        success: true,
+        issueIdentifier: rawIssueId,
+        keyResultId,
+        action,
       });
     },
   };

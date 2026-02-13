@@ -175,6 +175,61 @@ export class ApprovalManager {
         const truncated = body.length > 80 ? body.slice(0, 80) + "..." : body;
         return `Comment on ${identifier}: ${truncated}`;
       }
+      case "manage_project": {
+        const action = String(args.action || "create");
+        const name = String(args.projectName || "unknown");
+        if (action === "create") return `Create project: ${name}`;
+        if (action === "archive") return `Archive project: ${name}`;
+        return `Update project: ${name}`;
+      }
+      case "manage_cycle": {
+        const action = String(args.action || "add_issue");
+        const identifier = String(args.issueId || "unknown");
+        const cycleName = args.cycleName ? String(args.cycleName) : "active cycle";
+        if (action === "add_issue") return `Add ${identifier} to cycle ${cycleName}`;
+        return `Remove ${identifier} from cycle`;
+      }
+      case "manage_labels": {
+        const action = String(args.action || "create");
+        const labelName = String(args.labelName || "unknown");
+        const identifier = args.issueId ? String(args.issueId) : undefined;
+        if (action === "create") return `Create label: ${labelName}`;
+        if (action === "add_to_issue") return `Add label '${labelName}' to ${identifier || "unknown"}`;
+        return `Remove label '${labelName}' from ${identifier || "unknown"}`;
+      }
+      case "create_okr": {
+        const objective = String(args.objective || "Untitled");
+        const quarter = String(args.quarter || "");
+        return `Create OKR: ${objective} (${quarter})`;
+      }
+      case "update_okr": {
+        const okrId = String(args.okrId || "unknown");
+        const changedFields: string[] = [];
+        if (args.objective !== undefined && args.objective !== null) changedFields.push("objective");
+        if (args.quarter !== undefined && args.quarter !== null) changedFields.push("quarter");
+        if (args.owner !== undefined && args.owner !== null) changedFields.push("owner");
+        if (args.status !== undefined && args.status !== null) changedFields.push("status");
+        if (args.keyResults && Array.isArray(args.keyResults)) changedFields.push("key results");
+        const fieldList = changedFields.length > 0 ? changedFields.join(", ") : "fields";
+        // Use objective if provided, otherwise fall back to okrId
+        const label = (args.objective !== undefined && args.objective !== null) ? String(args.objective) : okrId;
+        return `Update OKR: ${label} -- ${fieldList}`;
+      }
+      case "delete_okr": {
+        // Try to use objective from args context; the preview already fetches it from db
+        const okrId = String(args.okrId || "unknown");
+        return `Delete OKR: ${okrId}`;
+      }
+      case "update_key_result": {
+        const currentValue = args.currentValue !== undefined ? String(args.currentValue) : "unknown";
+        return `Update key result progress: ${currentValue}`;
+      }
+      case "link_issue_to_kr": {
+        const identifier = String(args.issueId || "unknown");
+        const action = String(args.action || "link");
+        if (action === "unlink") return `Unlink ${identifier} from key result`;
+        return `Link ${identifier} to key result`;
+      }
       default:
         return `Execute ${toolName}`;
     }
@@ -193,6 +248,36 @@ export class ApprovalManager {
         return `Deleted ${parsed.identifier || "unknown"}`;
       case "add_comment":
         return `Comment added to ${parsed.issueIdentifier || "unknown"}`;
+      case "manage_project": {
+        const name = parsed.name || parsed.projectName || "unknown";
+        if (parsed.projectId) return `Created project: ${name}`;
+        return `Updated project: ${name}`;
+      }
+      case "manage_cycle": {
+        const identifier = parsed.issueIdentifier || "unknown";
+        if (parsed.cycleName) return `Added ${identifier} to cycle ${parsed.cycleName}`;
+        return `Removed ${identifier} from cycle`;
+      }
+      case "manage_labels": {
+        const labelName = parsed.labelName || "unknown";
+        if (parsed.labelId) return `Created label: ${labelName}`;
+        const identifier = parsed.issueIdentifier || "unknown";
+        return `Label '${labelName}' updated on ${identifier}`;
+      }
+      case "create_okr":
+        return `Created OKR: ${parsed.objective || "unknown"}`;
+      case "update_okr":
+        return `Updated OKR: ${parsed.objective || "unknown"}`;
+      case "delete_okr":
+        return `Deleted OKR: ${parsed.objective || "unknown"}`;
+      case "update_key_result":
+        return `Key result progress updated to ${parsed.currentValue ?? "unknown"}`;
+      case "link_issue_to_kr": {
+        const action = String(parsed.action || "link");
+        const identifier = parsed.issueIdentifier || "unknown";
+        if (action === "unlink") return `Issue ${identifier} unlinked from key result`;
+        return `Issue ${identifier} linked to key result`;
+      }
       default:
         return parsed.success ? "Action completed successfully" : JSON.stringify(parsed).slice(0, 200);
     }
