@@ -15,6 +15,7 @@ import { ActionStateMachine } from "./services/actionStateMachine";
 import { ApprovalManager } from "./services/approvalManager";
 import { createToolHandlers } from "./tools/index";
 import { EnrichmentService } from "./services/enrichmentService";
+import { EmbeddingService } from "./services/embeddingService";
 import { registerHealthRoutes } from "./routes/health";
 import { registerSyncRoutes } from "./routes/sync";
 import { registerMemberRoutes } from "./routes/members";
@@ -47,12 +48,13 @@ export const createApp = async (cfg: AppConfig) => {
   const trackedLinearIds = new Set(cfg.trackedMembers.map(m => m.linearUserId));
   const chatService = new ChatService(db, openai, linear, cfg, trackedLinearIds);
   const actionStateMachine = new ActionStateMachine(db);
-  const toolHandlers = createToolHandlers(db, linear, cfg, trackedLinearIds);
+  const toolHandlers = createToolHandlers(db, linear, cfg, trackedLinearIds, embeddingService);
   const approvalManager = new ApprovalManager(actionStateMachine, toolHandlers, db);
   chatService.setApprovalManager(approvalManager);
   const skillService = new SkillService(db, openai);
   chatService.setSkillService(skillService);
   const enrichmentService = new EnrichmentService(db, openai);
+  const embeddingService = new EmbeddingService(db, openai);
 
   // Create Fastify app
   const app = Fastify({ logger: { level: cfg.logLevel } });
@@ -401,6 +403,26 @@ Keep it scannable. This should take < 30 seconds to read. Use bullet points, not
     if (!body?.issueIds?.length) return reply.status(400).send({ ok: false, error: "issueIds required" });
     const enrichments = await enrichmentService.enrichBatch(body.issueIds);
     return { ok: true, enrichments };
+  });
+
+  // ─── Embedding routes ───
+  app.post("/api/embeddings/resync", async (request) => {
+    const body = (request.body || {}) as { limit?: number };
+    const limit = body.limit || 100;
+    const result = await embeddingService.resyncEmbeddings(limit);
+    return { ok: true, ...result };
+  });
+
+  app.get("/api/embeddings/status", async () => {
+    const count = db.getEmbeddingCount();
+    return { ok: true, embeddingCount: count };
+  });
+
+  app.post("/api/embeddings/search", async (request, reply) => {
+    const body = request.body as { query?: string; limit?: number };
+    if (!body?.query) return reply.status(400).send({ ok: false, error: "query required" });
+    const results = await embeddingService.findSimilar(body.query, body.limit || 5);
+    return { ok: true, results };
   });
 
   // Background sync setup
