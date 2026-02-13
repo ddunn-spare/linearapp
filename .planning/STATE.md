@@ -5,32 +5,33 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** The AI agent can propose and execute real actions across Linear, GitHub, and internal tools -- with user approval before anything changes.
-**Current focus:** Phase 1 complete. Ready for Phase 2: Linear & OKR Write Actions
+**Current focus:** Phase 2 in progress: Linear & OKR Write Actions
 
 ## Current Position
 
-Phase: 1 of 4 (Approval Infrastructure & Flow) -- COMPLETE
-Plan: 3 of 3 in current phase (all done)
-Status: Phase complete -- ready for Phase 2
-Last activity: 2026-02-13 -- Completed 01-03-PLAN.md (human verification passed)
+Phase: 2 of 4 (Linear & OKR Write Actions)
+Plan: 1 of 4 in current phase (02-01 done)
+Status: Executing Phase 2
+Last activity: 2026-02-13 -- Completed 02-01-PLAN.md (core issue write tools)
 
-Progress: [###.......] 25%
+Progress: [####......] 31%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
+- Total plans completed: 4
 - Average duration: 4min
-- Total execution time: 0.18 hours
+- Total execution time: 0.25 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-approval-infrastructure-flow | 3 | 11min | 4min |
+| 02-linear-internal-write-actions | 1 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4min), 01-02 (4min), 01-03 (3min)
+- Last 5 plans: 01-01 (4min), 01-02 (4min), 01-03 (3min), 02-01 (4min)
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -55,6 +56,9 @@ Recent decisions affecting current work:
 - [01-03]: onApprove returns Promise<boolean> to support Approve All halt-on-failure pattern
 - [01-03]: Optimistic UI updates set executing state before API response, revert to failed on error
 - [01-03]: Streaming message ID generated early (before stream starts) to match proposals to current message
+- [02-01]: Tool handlers resolve human-readable names (assigneeName, labelNames, projectName) to IDs at execution time
+- [02-01]: ChatService constructor now receives LinearGraphqlClient and AppConfig for write tool handler initialization
+- [02-01]: getTeamId uses Map cache since team IDs do not change during session
 
 ### Pending Todos
 
@@ -67,5 +71,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed Phase 1 (01-03-PLAN.md verified). All 3 plans done. Ready for Phase 2 planning.
+Stopped at: Completed 02-01-PLAN.md (core issue write tools). Phase 2 plan 1 of 4 done. Continuing with 02-02.
 Resume file: None
